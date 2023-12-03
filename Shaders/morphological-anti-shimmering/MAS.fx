@@ -1,7 +1,5 @@
 #include "ReShadeUI.fxh"
 
-#define MASSampleInputBuffer(tex, coord) tex2D(tex, coord)
-
 #define ISmax3(x,y,z) max(max(x,y),z)
 #define ISmax4(w,x,y,z) max(max(w,x),max(y,z))
 #define ISmax5(v,w,x,y,z) max(max(max(v,w),x),max(y,z))
@@ -34,6 +32,10 @@
 
 #include "ReShade.fxh"
 
+#define MAS_RT_METRICS float4(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT, BUFFER_WIDTH, BUFFER_HEIGHT)
+
+#define MASSampleInputBuffer(tex, coord) tex2D(tex, coord)
+
 texture2D DepthWeightTex
 #if __RESHADE__ >= 50000
 < pooled = true; >
@@ -42,10 +44,10 @@ texture2D DepthWeightTex
 	Width = BUFFER_WIDTH;
 	Height = BUFFER_HEIGHT;
 	Format = R8;
-}
-sampler2D = DepthWeightBuffer {
+};
+sampler2D DepthWeightBuffer {
 	Texture = DepthWeightTex;
-}
+};
 
 texture2D PatternCodeTex
 #if __RESHADE__ >= 50000
@@ -55,57 +57,57 @@ texture2D PatternCodeTex
 	Width = BUFFER_WIDTH;
 	Height = BUFFER_HEIGHT;
 	Format = R8;
-}
-sampler2D = PatternCodeBuffer {
+};
+sampler2D PatternCodeBuffer {
 	Texture = PatternCodeTex;
-}
+};
 
 // TODO: comments, docs, unittest
-float DepthWeightCalcPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
-	const float minDepth = 0.15;
-	const float minWeight = 0.5;
-	const float peakDepth = 0.75;
-	const float peakWeight = 1.0;
-	const float maxDepth = 0.999;
-	const float maxWeight = 0.75;
+// float DepthWeightCalcPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+// 	const float minDepth = 0.15;
+// 	const float minWeight = 0.5;
+// 	const float peakDepth = 0.75;
+// 	const float peakWeight = 1.0;
+// 	const float maxDepth = 0.999;
+// 	const float maxWeight = 0.75;
 
-	// float currDepth = ReShade::GetLinearizedDepth(texcoord);
-	float currDepth = 0.5;
-	if(depth < minDepth || depth > maxDepth) {
-		discard;
-	}
+// 	// float currDepth = ReShade::GetLinearizedDepth(texcoord);
+// 	float currDepth = 0.5;
+// 	if(depth < minDepth || depth > maxDepth) {
+// 		discard;
+// 	}
 
-	float depthBlendWeight;
+// 	float depthBlendWeight;
 
-	// TODO: move to preprocessed strategies for optimalisation
-	if (currDepth == minDepth) {
-		depthBlendWeight = minWeight;
-	} 
-	else if(currDepth < peakDepth){
-		float minToPeakDiff = peakDepth - minDepth;
-		float minToCurrDiff = currDepth - minDepth;
+// 	// TODO: move to preprocessed strategies for optimalisation
+// 	if (currDepth == minDepth) {
+// 		depthBlendWeight = minWeight;
+// 	} 
+// 	else if(currDepth < peakDepth){
+// 		float minToPeakDiff = peakDepth - minDepth;
+// 		float minToCurrDiff = currDepth - minDepth;
 
-		float ratio = minToCurrDiff / minToPeakDiff;
+// 		float ratio = minToCurrDiff / minToPeakDiff;
 
-		depthBlendWeight = lerp(minWeight, peakWeight, ratio);
-	} 
-	else if (currDepth = peakDepth){
-		depthBlendWeight = peakWeight;
-	}
-	else if(currDepth > peakDepth){
-		float peakToMaxDiff = maxDepth - peakDepth;
-		float peakToCurrDiff = currDepth - peakDepth;
+// 		depthBlendWeight = lerp(minWeight, peakWeight, ratio);
+// 	} 
+// 	else if (currDepth = peakDepth){
+// 		depthBlendWeight = peakWeight;
+// 	}
+// 	else if(currDepth > peakDepth){
+// 		float peakToMaxDiff = maxDepth - peakDepth;
+// 		float peakToCurrDiff = currDepth - peakDepth;
 
-		float ratio = peakToCurrDiff / peakToMaxDiff;
+// 		float ratio = peakToCurrDiff / peakToMaxDiff;
 
-		depthBlendWeight = lerp(peakWeight, maxWeight, ratio);
-	} 
-	else if (currDepth == maxDepth) {
-		depthBlendWeight = maxWeight;
-	}
+// 		depthBlendWeight = lerp(peakWeight, maxWeight, ratio);
+// 	} 
+// 	else if (currDepth == maxDepth) {
+// 		depthBlendWeight = maxWeight;
+// 	}
 
-	return depthBlendWeight;
-}
+// 	return depthBlendWeight;
+// }
 
 /**
  * Prepares the 4 components that will be used to create offsets for texture sampling
@@ -114,7 +116,7 @@ void MASPatternDetectionVS(
 	in uint id : SV_VertexID,
 	out float4 position : SV_Position, 
 	out float2 texcoord : TEXCOORD0, 
-	out float4 offset[3] : TEXCOORD1 //TODO: check what this means exactly and if it's good practice/desirable
+	out float4 offset : TEXCOORD1 //TODO: check what this means exactly and if it's good practice/desirable
 	) {
 		// This needs to happen in every vertex shader function?
 		PostProcessVS(id, position, texcoord);
@@ -124,61 +126,140 @@ void MASPatternDetectionVS(
 	 * z -> y-1
 	 * w -> y+1
 	 */
-    neighbourCoords = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
-		float2 N = float2(texcoord.x, neighbourCoords.z);
-		float2 NE = float2(neighbourCoords.yz);
-		float2 E = float2(neighbourCoords.y, texcoord.y);
-		float2 SE = float2(neighbourCoords.yw);
-		float2 S = float2(texcoord.x, neighbourCoords.w);
-		float2 SW = float2(neighbourCoords.xw);
-		float2 W = float2(neighbourCoords.x, texcoord.y);
-		float2 NW = float2(neighbourCoords.xz);
+    offset = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
+    // float4 neighbourCoords = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
+	// float2 N = float2(texcoord.x, neighbourCoords.z);
+	// float2 NE = float2(neighbourCoords.yz);
+	// float2 E = float2(neighbourCoords.y, texcoord.y);
+	// float2 SE = float2(neighbourCoords.yw);
+	// float2 S = float2(texcoord.x, neighbourCoords.w);
+	// float2 SW = float2(neighbourCoords.xw);
+	// float2 W = float2(neighbourCoords.x, texcoord.y);
+	// float2 NW = float2(neighbourCoords.xz);
 
-		offset[0] = float4(N,NE);
-		offset[1] = float4(E,SE);
-		offset[2] = float4(S,SW);
-		offset[3] = float4(W,NW);
+	// offset[0] = float4(N,NE);
+	// offset[1] = float4(E,SE);
+	// offset[2] = float4(S,SW);
+	// offset[3] = float4(W,NW);
 }
 
-float PatternDetectPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset[3] : TEXCOORD1) : SV_TARGET 
+float2 GetNeighbourCoords(float2 texcoord : TEXCOORD, float4 offset : TEXCOORD1, uint index)
 {
-	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord);
-	if(depthWeight == 0.0) {
-		discard;
+	float2 res;
+	if (index <= 3) {
+		if(index <= 1) {
+			if (index == 0) {
+				// TODO: consider putting this in pre-processor values
+				res = float2(texcoord.x, offset.z);
+			} else {
+				res = float2(offset.yz);
+			}
+		} else {
+			if (index == 2) {
+				res = float2(offset.y, texcoord.y);
+			} else {
+				res = float2(offset.yw);
+			}
+		}
+	} else {
+		if(index <= 5) {
+			if (index == 4) {
+				res = float2(texcoord.x, offset.w);
+			} else {
+				res = float2(offset.xw);
+			}
+		} else {
+			if (index == 6) {
+				res = float2(offset.x, texcoord.y);
+			} else {
+				res = float2(offset.xz);
+			}
+		}
 	}
 
+	return res;
+}
+
+float PatternDetectPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset: TEXCOORD1) : SV_TARGET 
+{
+	// float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord);
+	// if(depthWeight == 0.0) {
+	// 	discard;
+	// }
+
 	uint index = 0;
-	uint index2 = 0;
-	float2 nextNeighbourCoords = offset[0].xy;
-	while index < 8 {
-		if(index % 2 == 0){
-			nextNeighbourCoords = offset[index2].zw;
-		} else {
-			index2++;
-			nextNeighbourCoords = offset[index2].xy;
-		}
+	float neighCoordsSum = 0;
+	while (index < 8) {
+		float2 neighCoords = GetNeighbourCoords(texcoord, offset, index);
+		neighCoordsSum += neighCoords.y;
 		index++;
 	}
 
 	// TODO: wip
+	// return neighCoordsSum;
+	return clamp(neighCoordsSum, 0, 255) / 255.0;
 }
 
-float DrawPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
-	// TODO: wip
+float3 TestNeighCoordsWork(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+	float data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
+	return float3(data,0.0,0.0);
 }
 
+float3 TestUintsCanBePutIntoTexture(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+	uint data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
+	if(data == 64){
+		return float3(1.0,0.0,0.0);
+	}
+	return float3(0.0,0.0,0.0);
+}
 
-technique Morphological Anti Shimmering  <
+float3 TestBitOperatorsCanDetectOriginalValue(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+	float data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
+	uint a = data * 255;
+	uint correctBit = ((a >> 6) & 1);
+	if( correctBit == 1){
+		return float3(1.0,0.0,0.0);
+	}
+	return float3(0.0,0.0,0.0);
+}
+
+float3 TestNeighbourHoodValuesCanBePutIntoFloat(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+	float data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
+	uint a = data * 255;
+	// uint bitshift = ((a >> 6) & 1);
+	// if( bitshift == 1){
+	// 	return float3(1.0,0.0,0.0);
+	// }
+	if(a > 5) {
+		return float3(1.0,0.0,0.0);
+	}
+	return float3(0.0,0.0,0.0);
+}
+
+float3 TestFloatsCanRepresentIntegers(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+	float data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
+	if(data > 0.0){
+		return float3(1.0,0.0,0.0);
+	}
+	return float3(0.0,0.0,0.0);
+}
+
+// float DrawPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+// 	// TODO: wip
+// }
+
+
+technique MorphologicalAntiShimmering  <
 	ui_tooltip = "";
 >
 {
-	pass DepthWeightCalculation
-	{
-		VertexShader = PostProcessVS;
-		PixelShader = DepthWeightCalcPS;
-		RenderTarget = DepthWeightBuffer;
-		ClearRenderTargets = true;
-	}
+	// pass DepthWeightCalculation
+	// {
+	// 	VertexShader = PostProcessVS;
+	// 	PixelShader = DepthWeightCalcPS;
+	// 	RenderTarget = DepthWeightBuffer;
+	// 	ClearRenderTargets = true;
+	// }
 	pass PatternDetection
 	{
 		VertexShader = MASPatternDetectionVS;
@@ -186,9 +267,14 @@ technique Morphological Anti Shimmering  <
 		RenderTarget = PatternCodeTex;
 		ClearRenderTargets = true;
 	}
-	pass Blend
+	// pass Blend
+	// {
+	// 	VertexShader = PostProcessVS;
+	// 	PixelShader = BlendPS;
+	// }
+	pass DebugPS
 	{
 		VertexShader = PostProcessVS;
-		PixelShader = BlendPS;
+		PixelShader = TestNeighbourHoodValuesCanBePutIntoFloat;
 	}
 }
