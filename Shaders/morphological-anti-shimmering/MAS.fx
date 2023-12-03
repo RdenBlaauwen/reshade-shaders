@@ -1,5 +1,7 @@
 #include "ReShadeUI.fxh"
 
+#define MAS_RT_METRICS float4(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT, BUFFER_WIDTH, BUFFER_HEIGHT)
+
 #define TSMAA_Tex2D(tex, coord) tex2Dlod(tex, (coord).xyxy)
 
 #define ISmax3(x,y,z) max(max(x,y),z)
@@ -107,6 +109,26 @@ float DepthWeightCalcPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : 
 	return depthBlendWeight;
 }
 
+/**
+ * Prepares the 4 components that will be used to create offsets for texture sampling
+ */
+void MASPatternDetectionVS(
+	in uint id : SV_VertexID,
+	out float4 position : SV_Position, 
+	out float2 texcoord : TEXCOORD0, 
+	out float4 offset : TEXCOORD1 //TODO: check what this means exactly and if it's good practice/desirable
+	) {
+		// This needs to happen in every vertex shader function?
+		PostProcessVS(id, position, texcoord);
+	/**
+	 * x -> x-1
+	 * y -> x+1
+	 * z -> y-1
+	 * w -> y+1
+	 */
+    offset = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
+}
+
 float PatternDetectPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
 	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord);
 	if(depthWeight == 0.0) {
@@ -134,7 +156,7 @@ technique Morphological Anti Shimmering  <
 	}
 	pass PatternDetection
 	{
-		VertexShader = PostProcessVS;
+		VertexShader = MASPatternDetectionVS;
 		PixelShader = PatternDetectPS;
 		RenderTarget = PatternCodeTex;
 		ClearRenderTargets = true;
