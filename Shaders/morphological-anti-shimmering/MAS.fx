@@ -1,8 +1,6 @@
 #include "ReShadeUI.fxh"
 
-#define MAS_RT_METRICS float4(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT, BUFFER_WIDTH, BUFFER_HEIGHT)
-
-#define TSMAA_Tex2D(tex, coord) tex2Dlod(tex, (coord).xyxy)
+#define MASSampleInputBuffer(tex, coord) tex2D(tex, coord)
 
 #define ISmax3(x,y,z) max(max(x,y),z)
 #define ISmax4(w,x,y,z) max(max(w,x),max(y,z))
@@ -129,7 +127,8 @@ void MASPatternDetectionVS(
     offset = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
 }
 
-float PatternDetectPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+float PatternDetectPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset : TEXCOORD1) : SV_TARGET 
+{
 	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord);
 	if(depthWeight == 0.0) {
 		discard;
