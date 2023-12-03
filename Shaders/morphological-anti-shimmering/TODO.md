@@ -1,0 +1,2 @@
+- Consider using pixcoord instead of texcoord
+  - find out what the difference is, and test it

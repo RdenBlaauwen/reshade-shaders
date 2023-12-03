@@ -114,7 +114,7 @@ void MASPatternDetectionVS(
 	in uint id : SV_VertexID,
 	out float4 position : SV_Position, 
 	out float2 texcoord : TEXCOORD0, 
-	out float4 offset : TEXCOORD1 //TODO: check what this means exactly and if it's good practice/desirable
+	out float4 offset[3] : TEXCOORD1 //TODO: check what this means exactly and if it's good practice/desirable
 	) {
 		// This needs to happen in every vertex shader function?
 		PostProcessVS(id, position, texcoord);
@@ -124,14 +124,40 @@ void MASPatternDetectionVS(
 	 * z -> y-1
 	 * w -> y+1
 	 */
-    offset = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
+    neighbourCoords = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
+		float2 N = float2(texcoord.x, neighbourCoords.z);
+		float2 NE = float2(neighbourCoords.yz);
+		float2 E = float2(neighbourCoords.y, texcoord.y);
+		float2 SE = float2(neighbourCoords.yw);
+		float2 S = float2(texcoord.x, neighbourCoords.w);
+		float2 SW = float2(neighbourCoords.xw);
+		float2 W = float2(neighbourCoords.x, texcoord.y);
+		float2 NW = float2(neighbourCoords.xz);
+
+		offset[0] = float4(N,NE);
+		offset[1] = float4(E,SE);
+		offset[2] = float4(S,SW);
+		offset[3] = float4(W,NW);
 }
 
-float PatternDetectPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset : TEXCOORD1) : SV_TARGET 
+float PatternDetectPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset[3] : TEXCOORD1) : SV_TARGET 
 {
 	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord);
 	if(depthWeight == 0.0) {
 		discard;
+	}
+
+	uint index = 0;
+	uint index2 = 0;
+	float2 nextNeighbourCoords = offset[0].xy;
+	while index < 8 {
+		if(index % 2 == 0){
+			nextNeighbourCoords = offset[index2].zw;
+		} else {
+			index2++;
+			nextNeighbourCoords = offset[index2].xy;
+		}
+		index++;
 	}
 
 	// TODO: wip
