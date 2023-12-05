@@ -314,6 +314,10 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 		i++;
 	}
 
+	// matchesInARow has already gone over limit before all 8 neighbours are searched, return early.
+	if(matchesInARow > maxMatchesInARow){
+		discard;
+	}
 	// Early tests showed false negatives occurred around the beginning and end of the cycle,
 	// because matches in the beginning and end would not be recognised as belonging to the same structure
 	// Continuing the additions and subtractions to/from matchesInARow for about half a cycle fixes this
@@ -326,7 +330,7 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 		}
 		i++;
 	}
-
+	// Check again
 	if(matchesInARow > maxMatchesInARow){
 		discard;
 	}
@@ -387,5 +391,6 @@ technique MorphologicalAntiShimmering  <
 	{
 		VertexShader = PostProcessVS;
 		PixelShader = DrawPS;
+		// TODO: consider `SRGBWriteEnable = true;`
 	}
 }
