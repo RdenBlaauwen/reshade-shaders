@@ -6,17 +6,18 @@ uniform float MASColorThreshold <
 	ui_max = 1.0;
 	ui_step = 0.001;
 	ui_label = "Color threshold";
-> = 0.12;
+> = 0.15;
 
 uniform float MASDepthThreshold <
 	ui_type = "slider";
-	ui_min = 0.001;
+	ui_min = 0.000;
 	ui_max = 1.0;
 	ui_step = 0.001;
-	ui_label = "Color threshold";
+	ui_label = "Depth threshold";
 > = 0.004;
 
 #define __LUM_WEIGHTS (float3( 0.299, 0.587, 0.114 ))
+#define SMAA_THRESHOLD MASColorThreshold
 
 #define ISmax3(x,y,z) max(max(x,y),z)
 #define ISmax4(w,x,y,z) max(max(w,x),max(y,z))
@@ -81,7 +82,7 @@ sampler2D PatternCodeBuffer {
 	Texture = PatternCodeTex;
 };
 
-static const uint PATTERN_CODE_LUT[8] = {1,2,4,8,16,32,64,128};
+static const float PATTERN_CODE_LUT[8] = {1.0,2.0,4.0,8.0,16.0,32.0,64.0,128.0};
 
 
 bool depthDiffIsSignificant(float depthA, float depthB)
@@ -95,10 +96,36 @@ float getWeightedDiff(float3 colorA, float3 colorB)
 	return dot( diff.rgb, __LUM_WEIGHTS.rgb);
 }
 
+// float getWeightedDiff(float3 colorA, float3 colorB)
+// {
+// 	float rMax = max(colorA.r, colorB.r);
+// 	float rMin = min(colorA.r, colorB.r);
+// 	return rMax - rMin;
+// 	// return 0.1;
+// }
+
 bool colorDiffIsSignificant(float3 colorA, float3 colorB)
 {
 	return getWeightedDiff(colorA, colorB) >= MASColorThreshold;
+	// return getWeightedDiff(colorA, colorB) > 0.0;
 }
+
+// bool colorDiffIsSignificant(float3 colorA, float3 colorB)
+// {
+// 	float3 diff = abs(colorA - colorB);
+// 	float maxDelta = max(diff.r, max(diff.g, diff.b));
+// 	float edge = step(SMAA_THRESHOLD, maxDelta);
+
+// 	// if(diff.r < 0.0 || diff.g < 0.0 || diff.b < 0.0){
+// 	// 	return true;
+// 	// }
+// 	return maxDelta > 0.2;
+// 	// if(dot(edge, 1.0) == 0.0){
+// 	// 	return false;
+// 	// }
+// 	// return true;
+// }
+
 float2 GetNeighbourCoords(float2 texcoord : TEXCOORD, float4 offset : TEXCOORD1, uint index)
 {
 	float2 res;
@@ -137,36 +164,34 @@ float2 GetNeighbourCoords(float2 texcoord : TEXCOORD, float4 offset : TEXCOORD1,
 }
 
 /**
- * Turn uint ranging from 0 - 255 into a float ranging from 0.0 - 1.0.
- * Makes it suitable for storing in an R8 texture
+ * Turn float ranging from 0 - 255 into a float ranging from 255 - 0, and the othe way around.
+ * This makes it possible to distinguish coords with 0 matches (index: 0)
+ * from "empty" coords (read: untouched coords that should be skipped)
  */
-float encode(uint patternCode)
+float invert(float patternCode)
 {
-	const MAX_VAL_8_BIT = 255;
-	// the subtraction inverts the value. This makes it possible to distinguish coords with 0 matches (index: 0)
-	// from "empty" coords (read: untouched coords that should be skipped)
-	return (MAX_VAL_8_BIT - patternCode) / MAX_VAL_8_BIT;
-}
-
-/**
- * Decode float ranging from 0.0 - 1.0 from R8 texture to a uint with a range of 0 - 255 again.
- */
-uint decode(float patternCode)
-{
-	const MAX_VAL_8_BIT = 255;
-	return MAX_VAL_8_BIT - (patternCode * MAX_VAL_8_BIT);
+	const float MAX_VAL_8_BIT = 255.0;
+	// the subtraction inverts the value. 
+	return MAX_VAL_8_BIT - patternCode;
 }
 
 // TODO: comments, docs, unittest
 float DepthWeightCalcPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET 
 {
 	// TODO: move to preprocessor values, make UI controls for them
-	const float minDepth = 0.15;
-	const float minWeight = 0.5;
+	// const float minDepth = 0.15;
+	// const float minWeight = 0.5;
+	// const float peakDepth = 0.75;
+	// const float peakWeight = 1.0;
+	// const float maxDepth = 0.999;
+	// const float maxWeight = 0.75;
+
+	const float minDepth = 0.0;
+	const float minWeight = 1.0;
 	const float peakDepth = 0.75;
 	const float peakWeight = 1.0;
 	const float maxDepth = 0.999;
-	const float maxWeight = 0.75;
+	const float maxWeight = 1.0;
 
 	float currDepth = ReShade::GetLinearizedDepth(texcoord);
 	// float currDepth = 0.5;
@@ -226,6 +251,32 @@ void MASPatternDetectionVS(
     offset = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
 }
 
+float PatternDetectionPSTest(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset: TEXCOORD1) : SV_TARGET 
+{
+	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord.xyxy).r;
+	if(depthWeight == 0.0) {
+		return 0.0;
+		// discard; // Error codes: x3570, x4121, x4014
+	}
+
+	// float3 targetColor = MASSampleInputBuffer(ReShade::BackBuffer, texcoord).rgb;
+	// float3 N = MASSampleInputBuffer(ReShade::BackBuffer, GetNeighbourCoords(texcoord, offset, 0)).rgb;
+	// float maxDelta = max(targetColor.r,max(targetColor.g,targetColor.b));
+	// return maxDelta < 0.5 ? 1.0 : 0.0;
+
+	// float3 white = float3(0.32,0.325,0.33);
+	float3 black = float3(0.329,0.329,0.337);
+	float3 black2 = float3(0.11,0.113,0.137);
+
+	return !colorDiffIsSignificant(black2, black) ? 1.0 : 0.0;
+
+	// float targetDepth = ReShade::GetLinearizedDepth(texcoord);
+	// float NDepth = ReShade::GetLinearizedDepth(GetNeighbourCoords(texcoord, offset, 3));
+
+	// return depthDiffIsSignificant(targetDepth, NDepth) ? 1.0 : 0.0;
+}
+
+//TODO: try looking at pixels that DO get picked up by the algorithm. What makes them different?
 float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset: TEXCOORD1) : SV_TARGET 
 {
 	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord.xyxy).r;
@@ -238,12 +289,12 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 	float3 targetColor = MASSampleInputBuffer(ReShade::BackBuffer, texcoord).rgb;
 
 	const uint nrOfNeighbs = 8;
-	const uint maxHitsInARow = 2;
+	const uint maxMatchesInARow = 1;
 	uint i = 0;
 	uint matchesInARow = 0;	
-	uint code = 0;
+	float code = 0.0;
 	uint matchMap[nrOfNeighbs] = {0,0,0,0,0,0,0,0};
-	while (matchesInARow <= maxHitsInARow && i < nrOfNeighbs) {
+	while (matchesInARow <= maxMatchesInARow && i < nrOfNeighbs) {
 		float2 neighCoords = GetNeighbourCoords(texcoord, offset, i);
 
 		float depth = ReShade::GetLinearizedDepth(neighCoords);
@@ -255,17 +306,19 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 				matchMap[i] = 1;
 				// isSame = true;
 				code += PATTERN_CODE_LUT[i];
+				matchesInARow += 2;
 			}
 		}
-		matchesInARow = (matchMap[i] == 1) ? matchesInARow + 1 : max(0, matchesInARow - 1);
+		matchesInARow = max(0, matchesInARow - 1);
+		// matchesInARow = (matchMap[i] == 1) ? matchesInARow + 1 : max(0, matchesInARow - 1);
 		i++;
 	}
 
 	// Early tests showed false negatives occurred around the beginning and end of the cycle,
 	// because matches in the beginning and end would not be recognised as belonging to the same structure
-	// Adding and subtracting the first half to/from matchesInARow again should fix this.
+	// Continuing the additions and subtractions to/from matchesInARow for about half a cycle fixes this
 	i = 0;
-	while (matchesInARow <= maxHitsInARow && i < nrOfNeighbs / 2) {
+	while (matchesInARow <= maxMatchesInARow && i < 4) {
 		if(matchMap[i] == 1){
 			matchesInARow += 1;
 		} else {
@@ -274,16 +327,11 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 		i++;
 	}
 
-	if(matchesInARow > maxHitsInARow){
+	if(matchesInARow > maxMatchesInARow){
 		discard;
 	}
-	// uint nrOfBoundaryHits = matchMap[0] + matchMap[1] + matchMap[6] + matchMap[7];
-	// if(nrOfBoundaryHits > maxHitsInARow){
-	// 	discard;
-	// }
 
-	// return code / 255.0;
-	return encode(code);
+	return invert(code);
 }
 
 float3 TestBitOperatorsCanDetectOriginalValue(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
@@ -296,13 +344,23 @@ float3 TestBitOperatorsCanDetectOriginalValue(float4 pos : SV_POSITION, float2 t
 	return float3(0.0,0.0,0.0);
 }
 
+float3 DrawMatchesPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+	float rawMatches = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
+	float3 debugCol = lerp(float3(0.0,0.0,1.0), float3(1.0,0.0,0.0), (rawMatches > 0.0)?1.0:0.0);
+	// if (rawCode > 0.0) {
+	// 	debugCol = float3(1.0,0.0,0.0);
+	// }
+	float3 originalCol = tex2Dlod(ReShade::BackBuffer, texcoord.xyxy).rgb;
+	return lerp(originalCol, debugCol, 0.5);
+}
+
 float3 DrawPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
 	float rawCode = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
 	float3 debugCol = float3(0.0,0.0,0.0);
 	if (rawCode > 0.0) {
 		debugCol = float3(1.0,0.0,0.0);
 	}
-	float3 originalCol = tex2Dlod(ReShade::BackBuffer, texcoord).rgb;
+	float3 originalCol = tex2Dlod(ReShade::BackBuffer, texcoord.xyxy).rgb;
 	return lerp(originalCol, debugCol, 0.5);
 }
 
