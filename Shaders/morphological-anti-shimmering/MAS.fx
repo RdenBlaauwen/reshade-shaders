@@ -276,7 +276,6 @@ float PatternDetectionPSTest(float4 pos : SV_POSITION, float2 texcoord : TEXCOOR
 	// return depthDiffIsSignificant(targetDepth, NDepth) ? 1.0 : 0.0;
 }
 
-//TODO: try looking at pixels that DO get picked up by the algorithm. What makes them different?
 float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset: TEXCOORD1) : SV_TARGET 
 {
 	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord.xyxy).r;
