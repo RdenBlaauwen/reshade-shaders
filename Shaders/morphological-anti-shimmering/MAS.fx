@@ -251,30 +251,30 @@ void MASPatternDetectionVS(
     offset = mad(MAS_RT_METRICS.xxyy, float4(-1.0, 1.0, -1.0, 1.0), texcoord.xxyy);
 }
 
-float PatternDetectionPSTest(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset: TEXCOORD1) : SV_TARGET 
-{
-	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord.xyxy).r;
-	if(depthWeight == 0.0) {
-		return 0.0;
-		// discard; // Error codes: x3570, x4121, x4014
-	}
+// float PatternDetectionPSTest(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset: TEXCOORD1) : SV_TARGET 
+// {
+// 	float depthWeight = tex2Dlod(DepthWeightBuffer, texcoord.xyxy).r;
+// 	if(depthWeight == 0.0) {
+// 		return 0.0;
+// 		// discard; // Error codes: x3570, x4121, x4014
+// 	}
 
-	// float3 targetColor = MASSampleInputBuffer(ReShade::BackBuffer, texcoord).rgb;
-	// float3 N = MASSampleInputBuffer(ReShade::BackBuffer, GetNeighbourCoords(texcoord, offset, 0)).rgb;
-	// float maxDelta = max(targetColor.r,max(targetColor.g,targetColor.b));
-	// return maxDelta < 0.5 ? 1.0 : 0.0;
+// 	// float3 targetColor = MASSampleInputBuffer(ReShade::BackBuffer, texcoord).rgb;
+// 	// float3 N = MASSampleInputBuffer(ReShade::BackBuffer, GetNeighbourCoords(texcoord, offset, 0)).rgb;
+// 	// float maxDelta = max(targetColor.r,max(targetColor.g,targetColor.b));
+// 	// return maxDelta < 0.5 ? 1.0 : 0.0;
 
-	// float3 white = float3(0.32,0.325,0.33);
-	float3 black = float3(0.329,0.329,0.337);
-	float3 black2 = float3(0.11,0.113,0.137);
+// 	// float3 white = float3(0.32,0.325,0.33);
+// 	float3 black = float3(0.329,0.329,0.337);
+// 	float3 black2 = float3(0.11,0.113,0.137);
 
-	return !colorDiffIsSignificant(black2, black) ? 1.0 : 0.0;
+// 	return !colorDiffIsSignificant(black2, black) ? 1.0 : 0.0;
 
-	// float targetDepth = ReShade::GetLinearizedDepth(texcoord);
-	// float NDepth = ReShade::GetLinearizedDepth(GetNeighbourCoords(texcoord, offset, 3));
+// 	// float targetDepth = ReShade::GetLinearizedDepth(texcoord);
+// 	// float NDepth = ReShade::GetLinearizedDepth(GetNeighbourCoords(texcoord, offset, 3));
 
-	// return depthDiffIsSignificant(targetDepth, NDepth) ? 1.0 : 0.0;
-}
+// 	// return depthDiffIsSignificant(targetDepth, NDepth) ? 1.0 : 0.0;
+// }
 
 float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset: TEXCOORD1) : SV_TARGET 
 {
@@ -335,6 +335,16 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 	}
 
 	return invert(code);
+}
+
+// float3 BlendPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+
+// }
+
+float3 TestAsUIntCanDecodeFloat(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+	float data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
+	uint decoded asuint(invert(data));
+	return decoded > 0 ? float3(1.0,1.0,1.0) : float3(0.0,0.0,0.0);
 }
 
 float3 TestBitOperatorsCanDetectOriginalValue(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
