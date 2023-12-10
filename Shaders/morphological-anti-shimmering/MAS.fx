@@ -334,7 +334,8 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 		discard;
 	}
 
-	return invert(code);
+	// return invert(code);
+	return 253.0;
 }
 
 // float3 BlendPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
@@ -343,8 +344,21 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 
 float3 TestAsUIntCanDecodeFloat(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
 	float data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
-	uint decoded asuint(invert(data));
-	return decoded > 0 ? float3(1.0,1.0,1.0) : float3(0.0,0.0,0.0);
+	if(data == 0.0){
+		return float3(0.0,0.0,0.0);
+		// discard;
+	}
+	// float inverted = invert(data);
+	if(data == 1.0){
+		return float3(0.0,1.0,0.0);
+	}
+	// uint decoded = asuint(invert(data));
+	// if(decoded > 1132331007){
+	// 	return float3(1.0,0.0,0.0);
+	// }
+	// discard;
+	return float3(1.0,0.0,0.0);
+	// return decoded > 0 ? float3(1.0,1.0,1.0) : float3(0.0,0.0,0.0);
 }
 
 float3 TestBitOperatorsCanDetectOriginalValue(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
