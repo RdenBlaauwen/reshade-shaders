@@ -396,10 +396,15 @@ technique MorphologicalAntiShimmering  <
 		RenderTarget = PatternCodeTex;
 		ClearRenderTargets = true;
 	}
-	pass Blend
+	// pass Blend
+	// {
+	// 	VertexShader = MASPatternDetectionVS;
+	// 	PixelShader = DrawPS;
+	// 	// TODO: consider `SRGBWriteEnable = true;`
+	// }
+	pass TestAsUInt
 	{
 		VertexShader = PostProcessVS;
-		PixelShader = DrawPS;
-		// TODO: consider `SRGBWriteEnable = true;`
+		PixelShader = TestAsUIntCanDecodeFloat;
 	}
 }
