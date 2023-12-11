@@ -82,8 +82,18 @@ sampler2D PatternCodeBuffer {
 	Texture = PatternCodeTex;
 };
 
-static const float PATTERN_CODE_LUT[8] = {1.0,2.0,4.0,8.0,16.0,32.0,64.0,128.0};
-
+// static const float PATTERN_CODE_LUT[8] = {1.0,2.0,4.0,8.0,16.0,32.0,64.0,128.0};
+// The above values divided by 255.0
+static const float PATTERN_CODE_LUT[8] = {
+	0.00392156862745098,
+	0.00784313725490196,
+	0.0156862745098039,
+	0.0313725490196078,
+	0.0627450980392157,
+	0.125490196078431,
+	0.250980392156863,
+	0.501960784313725
+};
 
 bool depthDiffIsSignificant(float depthA, float depthB)
 {
