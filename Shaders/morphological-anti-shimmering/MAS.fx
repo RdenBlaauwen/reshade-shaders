@@ -106,18 +106,10 @@ float getWeightedDiff(float3 colorA, float3 colorB)
 	return dot( diff.rgb, __LUM_WEIGHTS.rgb);
 }
 
-// float getWeightedDiff(float3 colorA, float3 colorB)
-// {
-// 	float rMax = max(colorA.r, colorB.r);
-// 	float rMin = min(colorA.r, colorB.r);
-// 	return rMax - rMin;
-// 	// return 0.1;
-// }
 
 bool colorDiffIsSignificant(float3 colorA, float3 colorB)
 {
 	return getWeightedDiff(colorA, colorB) >= MASColorThreshold;
-	// return getWeightedDiff(colorA, colorB) > 0.0;
 }
 
 // bool colorDiffIsSignificant(float3 colorA, float3 colorB)
@@ -180,9 +172,9 @@ float2 GetNeighbourCoords(float2 texcoord : TEXCOORD, float4 offset : TEXCOORD1,
  */
 float invert(float patternCode)
 {
-	const float MAX_VAL_8_BIT = 255.0;
+	// const float MAX_VAL_8_BIT = 255.0;
 	// the subtraction inverts the value. 
-	return MAX_VAL_8_BIT - patternCode;
+	return 1.0 - patternCode;
 }
 
 // TODO: comments, docs, unittest
@@ -344,8 +336,9 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 		discard;
 	}
 
-	// return invert(code);
-	return 253.0;
+	return invert(code);
+	// return 0.5;
+	// return code;
 }
 
 // float3 BlendPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
@@ -356,19 +349,9 @@ float3 TestAsUIntCanDecodeFloat(float4 pos : SV_POSITION, float2 texcoord : TEXC
 	float data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
 	if(data == 0.0){
 		return float3(0.0,0.0,0.0);
-		// discard;
 	}
-	// float inverted = invert(data);
-	if(data == 1.0){
-		return float3(0.0,1.0,0.0);
-	}
-	// uint decoded = asuint(invert(data));
-	// if(decoded > 1132331007){
-	// 	return float3(1.0,0.0,0.0);
-	// }
-	// discard;
-	return float3(1.0,0.0,0.0);
-	// return decoded > 0 ? float3(1.0,1.0,1.0) : float3(0.0,0.0,0.0);
+	float inverted = invert(data);
+	return lerp(float3(1.0,0.0,0.0),float3(0.0,1.0,0.0), inverted);
 }
 
 float3 TestBitOperatorsCanDetectOriginalValue(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
@@ -384,9 +367,6 @@ float3 TestBitOperatorsCanDetectOriginalValue(float4 pos : SV_POSITION, float2 t
 float3 DrawMatchesPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
 	float rawMatches = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
 	float3 debugCol = lerp(float3(0.0,0.0,1.0), float3(1.0,0.0,0.0), (rawMatches > 0.0)?1.0:0.0);
-	// if (rawCode > 0.0) {
-	// 	debugCol = float3(1.0,0.0,0.0);
-	// }
 	float3 originalCol = tex2Dlod(ReShade::BackBuffer, texcoord.xyxy).rgb;
 	return lerp(originalCol, debugCol, 0.5);
 }
