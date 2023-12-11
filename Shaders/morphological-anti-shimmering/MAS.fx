@@ -84,7 +84,8 @@ sampler2D PatternCodeBuffer {
 
 // static const float PATTERN_CODE_LUT[8] = {1.0,2.0,4.0,8.0,16.0,32.0,64.0,128.0};
 // The above values divided by 255.0
-static const float PATTERN_CODE_LUT[8] = {
+static const uint PATTERN_CODE_LUT_LEN = 8;
+static const float PATTERN_CODE_LUT[PATTERN_CODE_LUT_LEN] = {
 	0.00392156862745098,
 	0.00784313725490196,
 	0.0156862745098039,
@@ -341,9 +342,40 @@ float PatternDetectionPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, f
 	// return code;
 }
 
-// float3 BlendPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
+float3 BlendPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offset: TEXCOORD1) : SV_TARGET {
+	float targetCodeRaw = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
+	if(targetCodeRaw == 0.0){
+		discard;
+	}
+	float targetCode = invert(targetCodeRaw);
 
-// }
+	uint sameDepth = 0;
+	float3 sameDepthSum = float3(0.0,0.0,0.0);
+	uint diffDepth = 0;
+	float3 diffDepthSum = float3(0.0,0.0,0.0);
+
+	[unroll] for (i = PATTERN_CODE_LUT_LEN - 1; i >= 0; i--){
+		float match = PATTERN_CODE_LUT[i];
+		if(targetCode >= match){
+			targetCode -= match;
+		} else {
+			float2 neighCoords = GetNeighbourCoords(texcoord, offset, i);
+
+			float depth = ReShade::GetLinearizedDepth(neighCoords);
+
+			float3 color = MASSampleInputBuffer(ReShade::BackBuffer, neighCoords).rgb;
+			if(depthDiffIsSignificant(depth, targetDepth)){
+				diffDepth++;
+				diffDepthSum += color;
+			} else {
+				sameDepth++;
+				sameDepthSum += color;
+			}
+		}
+	}
+
+	return ((sameDepthSum / sameDepth) + (diffDepthSum/ diffDepth))/2.0;
+}
 
 float3 TestAsUIntCanDecodeFloat(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
 	float data = MASSampleInputBuffer(PatternCodeBuffer, texcoord.xy).r;
@@ -400,15 +432,15 @@ technique MorphologicalAntiShimmering  <
 		RenderTarget = PatternCodeTex;
 		ClearRenderTargets = true;
 	}
-	// pass Blend
-	// {
-	// 	VertexShader = MASPatternDetectionVS;
-	// 	PixelShader = DrawPS;
-	// 	// TODO: consider `SRGBWriteEnable = true;`
-	// }
-	pass TestAsUInt
+	pass Blend
 	{
-		VertexShader = PostProcessVS;
-		PixelShader = TestAsUIntCanDecodeFloat;
+		VertexShader = MASPatternDetectionVS;
+		PixelShader = DrawPS;
+		// TODO: consider `SRGBWriteEnable = true;`
 	}
+	// pass TestAsUInt
+	// {
+	// 	VertexShader = PostProcessVS;
+	// 	PixelShader = TestAsUIntCanDecodeFloat;
+	// }
 }
