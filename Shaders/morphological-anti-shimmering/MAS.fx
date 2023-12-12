@@ -374,7 +374,7 @@ float3 BlendPS(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, float4 offs
 		}
 	}
 
-	return ((sameDepthSum / sameDepth) + (diffDepthSum/ diffDepth))/2.0;
+	return (sameDepthSum  + diffDepthSum) / (sameDepth + diffDepth);
 }
 
 float3 TestAsUIntCanDecodeFloat(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET {
