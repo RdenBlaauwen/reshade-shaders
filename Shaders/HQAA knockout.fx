@@ -3498,7 +3498,7 @@ float3 HQAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : 
 /******************************************************** OPTIONAL SHADER CODE END *****************************************************/
 /***************************************************************************************************************************************/
 
-technique HQAA knockout <
+technique HQAAKnockout <
 	ui_tooltip = "============================================================\n"
 				 "Hybrid high-Quality Anti-Aliasing combines techniques of\n"
 				 "both SMAA and FXAA to produce best possible image quality\n"
