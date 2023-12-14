@@ -168,7 +168,10 @@ uniform float HqaaSoftenerSpuriousStrength <
 #define __HQAA_EDGE_THRESHOLD clamp(HqaaEdgeThresholdCustom, __HQAA_THRESHOLD_FLOOR, 1.00)
 #define __HQAA_LUMA_REF float3(0.2126, 0.7152, 0.0722)
 
+#define __TSMAA_BUFFER_INFO float4(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT, BUFFER_WIDTH, BUFFER_HEIGHT)
+
 #define HQAA_Tex2D(tex, coord) tex2Dlod(tex, (coord).xyxy)
+#define TSMAA_Tex2D(tex, coord) tex2Dlod(tex, (coord).xyxy)
 
 #define SMAATexture2D(tex) sampler tex
 #define SMAATexturePass2D(tex) tex
@@ -457,6 +460,92 @@ float3 HQAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : 
 	return lerp(original, localavg, (highdelta ? clamp(HqaaSoftenerSpuriousStrength, 0.0, 4.0) : saturate(HqaaImageSoftenStrength)));
 }
 
+void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position, out float2 texcoord : TEXCOORD0, out float4 offset : TEXCOORD1)
+{
+	texcoord.x = (id == 2) ? 2.0 : 0.0;
+	texcoord.y = (id == 1) ? 2.0 : 0.0;
+	position = float4(texcoord * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    offset = mad(__TSMAA_BUFFER_INFO.xyxy, float4( 1.0, 0.0, 0.0,  1.0), texcoord.xyxy);
+}
+
+float3 TSMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+{
+	float3 a, b, c, d;
+	
+    float4 m = float4(
+			TSMAA_Tex2D(blendSampler, offset.xy).a, 
+			TSMAA_Tex2D(blendSampler, offset.zw).g, 
+			TSMAA_Tex2D(blendSampler, texcoord).zx
+		);
+    bool horiz = max(m.x, m.z) > max(m.y, m.w);
+    bool earlyExit = dot(m, float4(1,1,1,1)) == 0.0;
+    float jitteroffset = 1.0 - min(TsmaaJitterStrength * 2.0, 0.5); //TODO: add missing values
+	float maxblending = TsmaaJitterStrength + (0.8 * jitteroffset * TSMAAmax4(m.r, m.g, m.b, m.a)) + (0.2 * jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0));
+	
+// pattern:
+//  e f g
+//  h a b
+//  i c d
+
+#if __RENDERER__ >= 0xa000
+	float4 cdbared = tex2Dgather(ReShade::BackBuffer, texcoord, 0);
+	float4 cdbagreen = tex2Dgather(ReShade::BackBuffer, texcoord, 1);
+	float4 cdbablue = tex2Dgather(ReShade::BackBuffer, texcoord, 2);
+	a = float3(cdbared.w, cdbagreen.w, cdbablue.w);
+	float3 original = a;
+	if (earlyExit) return original;
+	a = ConditionalDecode(a);
+	b = ConditionalDecode(float3(cdbared.z, cdbagreen.z, cdbablue.z));
+	c = ConditionalDecode(float3(cdbared.x, cdbagreen.x, cdbablue.x));
+	d = ConditionalDecode(float3(cdbared.y, cdbagreen.y, cdbablue.y));
+#else
+	a = TSMAA_Tex2D(ReShade::BackBuffer, texcoord).rgb;
+	float3 original = a;
+	if (earlyExit) return original;
+	a = ConditionalDecode(a);
+	b = TSMAA_DecodeTex2DOffset(ReShade::BackBuffer, texcoord, int2(1, 0)).rgb;
+	c = TSMAA_DecodeTex2DOffset(ReShade::BackBuffer, texcoord, int2(0, 1)).rgb;
+	d = TSMAA_DecodeTex2DOffset(ReShade::BackBuffer, texcoord, int2(1, 1)).rgb;
+#endif
+	float3 e = TSMAA_DecodeTex2DOffset(ReShade::BackBuffer, texcoord, int2(-1, -1)).rgb;
+	float3 f = TSMAA_DecodeTex2DOffset(ReShade::BackBuffer, texcoord, int2(0, -1)).rgb;
+	float3 g = TSMAA_DecodeTex2DOffset(ReShade::BackBuffer, texcoord, int2(1, -1)).rgb;
+	float3 h = TSMAA_DecodeTex2DOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb;
+	float3 i = TSMAA_DecodeTex2DOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb;
+	
+	float3 x1 = (e + f + g) / 3.0;
+	float3 x2 = (h + a + b) / 3.0;
+	float3 x3 = (i + c + d) / 3.0;
+	float3 cap = (h + e + f + g + b) / 5.0;
+	float3 bucket = (h + i + c + d + b) / 5.0;
+	if (!horiz)
+	{
+		x1 = (e + h + i) / 3.0;
+		x2 = (f + a + c) / 3.0;
+		x3 = (g + b + d) / 3.0;
+		cap = (f + e + h + i + c) / 5.0;
+		bucket = (f + g + b + d + c) / 5.0;
+	}
+	float3 xy1 = (e + a + d) / 3.0;
+	float3 xy2 = (i + a + g) / 3.0;
+	float3 diamond = (h + f + c + b) / 4.0;
+	float3 square = (e + g + i + d) / 4.0;
+	
+	float3 highterm = TSMAAmax9(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
+	float3 lowterm = TSMAAmin9(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
+	
+	float3 localavg = ((a + x1 + x2 + x3 + xy1 + xy2 + diamond + square + cap + bucket) - (highterm + lowterm)) / 8.0;
+	
+	return lerp (original, ConditionalEncode(localavg), maxblending);
+}
+
+float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target{
+	if(TSMAASofteningTest){
+		return TSMAASofteningPS(vpos,texcoord,offset);
+	}
+	return HQAASofteningPS(vpos, texcoord);
+}
+
 // Rendering passes
 
 technique ESMAA
@@ -491,7 +580,7 @@ technique ESMAA
 	}
 	pass ImageSoftening
 	{
-		VertexShader = PostProcessVS;
-		PixelShader = HQAASofteningPS;
+		VertexShader = TSMAANeighborhoodBlendingVS;
+		PixelShader = ESMAASofteningPS;
 	}
 }
