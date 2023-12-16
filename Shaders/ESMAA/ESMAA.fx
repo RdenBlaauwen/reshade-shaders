@@ -166,6 +166,11 @@ uniform bool TSMAASofteningTest <
 	ui_category = "Image Softening";
 > = false;
 
+uniform bool TSMAAUsesHQAAHorizDetection<
+	ui_label = "TSMAA softening uses HQAA horiz detection";
+	ui_category = "Image Softening";
+> = false;
+
 #ifdef SMAA_PRESET_CUSTOM
 	#define SMAA_THRESHOLD EdgeDetectionThreshold
 	#define SMAA_MAX_SEARCH_STEPS MaxSearchSteps
@@ -497,7 +502,12 @@ float3 TSMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			TSMAA_Tex2D(blendSampler, offset.zw).g, 
 			TSMAA_Tex2D(blendSampler, texcoord).zx
 		);
-    bool horiz = max(m.x, m.z) > max(m.y, m.w);
+    bool horiz;
+	if(TSMAAUsesHQAAHorizDetection){
+		horiz = max(m.x, m.z) > max(m.y, m.w);
+	} else {
+    	horiz = edgedata.g;
+	}
     bool earlyExit = dot(m, float4(1,1,1,1)) == 0.0;
     float jitteroffset = 1.0 - min(TsmaaJitterStrength * 2.0, 0.5); //TODO: add missing values
 	float maxblending = TsmaaJitterStrength + (0.8 * jitteroffset * TSMAAmax4(m.r, m.g, m.b, m.a)) + (0.2 * jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0));
