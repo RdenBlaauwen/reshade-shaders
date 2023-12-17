@@ -68,6 +68,26 @@ uniform bool ESMAAEnableSoftening <
 	ui_category = "Image Softening";
 > = true;
 
+uniform bool ESMAAAvgDiffBasedSoftening <
+	ui_label = "Soften based on average difference.";
+	ui_tooltip = "Makes it so that blending strength is dependent on the difference between the target pixel \n"
+				"and all it's surrounding pixels, rather than just the largest difference. \n"
+				"Better at preserving detail, but may look more aliased.";
+	ui_category = "Image Softening";
+	ui_spacing = 1;
+> = true;
+
+uniform float ESMAABackgroundDepth <
+	ui_type = "slider";
+	ui_min = 0.8; ui_max = 0.999; ui_step = 0.001;
+	ui_label = "Background threshold";
+	ui_spacing = 2;
+	ui_tooltip = "The maximum depth where softening is performed. Pixels at greater depth than this \n"
+				 "are considered part of the background texture and will be skipped. The default should\n"
+				 " work fine for most games, but you can adjust it if necessary.";
+	ui_category = "Image Softening";
+> = 0.999;
+
 uniform float ESMAASofteningStrength <
 	ui_type = "slider";
 	ui_min = 0.05; ui_max = 1.0; ui_step = 0.01;
@@ -85,16 +105,7 @@ uniform float ESMAASofteningBaseStrength <
 	ui_tooltip = "The minimum amount amount of blending./n"
 				 "Higher values = more softening, even on less anomalous pixels";
 	ui_category = "Image Softening";
-> = 0.2;
-
-uniform bool ESMAAAvgDiffBasedSoftening <
-	ui_label = "Soften based on average difference.";
-	ui_tooltip = "Makes it so that blending strength is dependent on the difference between the target pixel \n"
-				"and all it's surrounding pixels, rather than just the largest difference. \n"
-				"Better at preserving detail, but may look more aliased.";
-	ui_category = "Image Softening";
-	ui_spacing = 1;
-> = true;
+> = 0.35;
 
 #ifdef SMAA_PRESET_CUSTOM
 	#define SMAA_THRESHOLD EdgeDetectionThreshold
@@ -303,8 +314,12 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 		SMAASampleLevelZero(blendSampler, offset.zw).g, 
 		SMAASampleLevelZero(blendSampler, texcoord).zx
 	); // right(?), bottom, right(?), left(?) 
-	bool horiz = max(m.x, m.z) > max(m.y, m.w);
-    bool earlyExit = !ESMAAEnableSoftening || dot(m, float4(1,1,1,1)) == 0.0;
+    bool noDelta = dot(m, float4(1,1,1,1)) == 0.0;
+
+	float depth = ReShade::GetLinearizedDepth(texcoord);
+	bool background = depth > ESMAABackgroundDepth;
+	bool earlyExit = !ESMAAEnableSoftening || noDelta || background;
+	// bool earlyExit = !ESMAAEnableSoftening || noDelta;
 	// if(earlyExit){ // this was actually less performant for some reason
 	// 	discard;
 	// }
@@ -349,6 +364,9 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 x3 = (i + c + d) / 3.0;
 	float3 cap = (h + e + f + g + b) / 5.0;
 	float3 bucket = (h + i + c + d + b) / 5.0;
+
+	// Use weight data to find out if the pixel is part of a horizontal structure.
+	bool horiz = max(m.x, m.z) > max(m.y, m.w);
 	if (!horiz)
 	{
 		x1 = (e + h + i) / 3.0;
