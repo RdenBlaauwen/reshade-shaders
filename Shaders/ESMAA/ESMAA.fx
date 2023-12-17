@@ -166,10 +166,14 @@ uniform bool TSMAASofteningTest <
 	ui_category = "Image Softening";
 > = false;
 
-uniform bool TSMAAUsesHQAAHorizDetection<
-	ui_label = "TSMAA softening uses HQAA horiz detection";
-	ui_category = "Image Softening";
-> = false;
+// uniform float TsmaaBlendCalcBalance <
+// 	ui_type = "slider";
+// 	ui_min = 0.0; ui_max = 1.0; ui_step = 0.001;
+// 	ui_label = "avg - max balance";
+// 	ui_spacing = 2;
+// 	ui_tooltip = "The balance between max and avg. lower = more avg, higher = more max";
+// 	ui_category = "Image Softening";
+// > = 0.8;
 
 #ifdef SMAA_PRESET_CUSTOM
 	#define SMAA_THRESHOLD EdgeDetectionThreshold
@@ -491,26 +495,29 @@ void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position :
 	texcoord.y = (id == 1) ? 2.0 : 0.0;
 	position = float4(texcoord * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
     offset = mad(__TSMAA_BUFFER_INFO.xyxy, float4( 1.0, 0.0, 0.0,  1.0), texcoord.xyxy);
+	// offset.xy -> pixel to the left
+	// offset.zw -> pixel to the bottom
 }
 
 float3 TSMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
 {
 	float3 a, b, c, d;
 	
-    float4 m = float4(
-			TSMAA_Tex2D(blendSampler, offset.xy).a, 
-			TSMAA_Tex2D(blendSampler, offset.zw).g, 
-			TSMAA_Tex2D(blendSampler, texcoord).zx
-		);
-    bool horiz;
-	if(TSMAAUsesHQAAHorizDetection){
-		horiz = max(m.x, m.z) > max(m.y, m.w);
-	} else {
-    	horiz = edgedata.g;
-	}
+	float4 m = float4(
+		TSMAA_Tex2D(blendSampler, offset.xy).a, 
+		TSMAA_Tex2D(blendSampler, offset.zw).g, 
+		TSMAA_Tex2D(blendSampler, texcoord).zx
+	); // right(?), bottom, right(?), left(?) 
+	bool horiz = max(m.x, m.z) > max(m.y, m.w);
     bool earlyExit = dot(m, float4(1,1,1,1)) == 0.0;
-    float jitteroffset = 1.0 - min(TsmaaJitterStrength * 2.0, 0.5); //TODO: add missing values
-	float maxblending = TsmaaJitterStrength + (0.8 * jitteroffset * TSMAAmax4(m.r, m.g, m.b, m.a)) + (0.2 * jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0));
+	// if(earlyExit){ // this was actually less performant for some reason
+	// 	discard;
+	// }
+    float jitteroffset = 1.0 - min(TsmaaJitterStrength * 2.0, 0.5);
+	// float maxblending = TsmaaJitterStrength + (TsmaaBlendCalcBalance * jitteroffset * TSMAAmax4(m.r, m.g, m.b, m.a)) + ((1 - TsmaaBlendCalcBalance) * jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0));
+	// float maxblending = TsmaaJitterStrength + (0.8 * jitteroffset * TSMAAmax4(m.r, m.g, m.b, m.a)) + (0.2 * jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0));
+	// using both the max of m and avg of m made little difference. avg of m was slightly better at preserving detail, so I went with that.
+	float maxblending = TsmaaJitterStrength + (jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0)); 
 	
 // pattern:
 //  e f g
