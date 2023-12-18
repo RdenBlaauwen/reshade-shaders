@@ -273,12 +273,19 @@ float2 SMAAEdgeDetectionWrapPS(
 	else
 		return ((SMAALumaEdgeDetectionPS(texcoord, offset, colorGammaSampler) + SMAAColorEdgeDetectionPS(texcoord, offset, colorGammaSampler))/2);
 }
+
+float4 TestBlendingWeightPS(float2 texcoord : TEXCOORD0) : SV_TARGET
+{
+	return float4(0.25,0.5,0.75,1.0);
+}
+
 float4 SMAABlendingWeightCalculationWrapPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
 	float2 pixcoord : TEXCOORD1,
 	float4 offset[3] : TEXCOORD2) : SV_Target
 {
+	// return TestBlendingWeightPS(texcoord);
 	return SMAABlendingWeightCalculationPS(texcoord, pixcoord, offset, edgesSampler, areaSampler, searchSampler, 0.0);
 }
 
@@ -294,7 +301,6 @@ float3 SMAANeighborhoodBlendingWrapPS(
 
 	return SMAANeighborhoodBlendingPS(texcoord, offset, colorLinearSampler, blendSampler).rgb;
 }
-
 void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position, out float2 texcoord : TEXCOORD0, out float4 offset : TEXCOORD1)
 {
 	texcoord.x = (id == 2) ? 2.0 : 0.0;
@@ -309,11 +315,16 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 {
 	float3 a, b, c, d;
 	
-	float4 m = float4(
-		SMAASampleLevelZero(blendSampler, offset.xy).a, 
-		SMAASampleLevelZero(blendSampler, offset.zw).g, 
-		SMAASampleLevelZero(blendSampler, texcoord).zx
-	); // right(?), bottom, right(?), left(?) 
+	float4 m = SMAASampleLevelZero(blendSampler, texcoord).xyzw;
+	// original weight measurements and horizontal
+	// m = float4(
+	// 	SMAASampleLevelZero(blendSampler, offset.xy).a, 
+	// 	SMAASampleLevelZero(blendSampler, offset.zw).g, 
+	// 	SMAASampleLevelZero(blendSampler, texcoord).zx
+	// ); 
+	// Use weight data to find out if the pixel is part of a horizontal structure.
+	// horiz = max(m.x, m.z) > max(m.y, m.w);
+
     bool noDelta = dot(m, float4(1,1,1,1)) == 0.0;
 
 	float depth = ReShade::GetLinearizedDepth(texcoord);
@@ -365,16 +376,14 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 cap = (h + e + f + g + b) / 5.0;
 	float3 bucket = (h + i + c + d + b) / 5.0;
 
-	// Use weight data to find out if the pixel is part of a horizontal structure.
-	bool horiz = max(m.x, m.z) > max(m.y, m.w);
-	if (!horiz)
-	{
-		x1 = (e + h + i) / 3.0;
-		x2 = (f + a + c) / 3.0;
-		x3 = (g + b + d) / 3.0;
-		cap = (f + e + h + i + c) / 5.0;
-		bucket = (f + g + b + d + c) / 5.0;
-	}
+	// if (!horiz)
+	// {
+	// 	x1 = (e + h + i) / 3.0;
+	// 	x2 = (f + a + c) / 3.0;
+	// 	x3 = (g + b + d) / 3.0;
+	// 	cap = (f + e + h + i + c) / 5.0;
+	// 	bucket = (f + g + b + d + c) / 5.0;
+	// }
 	float3 xy1 = (e + a + d) / 3.0;
 	float3 xy2 = (i + a + g) / 3.0;
 	float3 diamond = (h + f + c + b) / 4.0;
