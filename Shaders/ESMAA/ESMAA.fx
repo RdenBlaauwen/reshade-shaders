@@ -64,48 +64,72 @@ uniform int DebugOutput < __UNIFORM_COMBO_INT1
 > = false;
 
 uniform bool ESMAAEnableSoftening <
+	ui_category = "Image Softening";
 	ui_label = "Enable softening";
-	ui_category = "Image Softening";
 > = true;
 
-uniform bool ESMAAAvgDiffBasedSoftening <
-	ui_label = "Soften based on average difference.";
-	ui_tooltip = "Makes it so that blending strength is dependent on the difference between the target pixel \n"
-				"and all it's surrounding pixels, rather than just the largest difference. \n"
-				"Better at preserving detail, but may look more aliased.";
+uniform bool ESMAADisableBackgroundSoftening <
 	ui_category = "Image Softening";
-	ui_spacing = 1;
+	ui_label = "Skip background";
+	ui_tooltip = "This lets the shader skip the sky/background/skybox.\n"
+				 "Only works if ReShade has access to this game's depth buffer.";
 > = true;
 
-uniform float ESMAABackgroundDepth <
-	ui_type = "slider";
-	ui_min = 0.8; ui_max = 0.999; ui_step = 0.001;
-	ui_label = "Background threshold";
-	ui_spacing = 2;
-	ui_tooltip = "The maximum depth where softening is performed. Pixels at greater depth than this \n"
-				 "are considered part of the background texture and will be skipped. The default should\n"
-				 " work fine for most games, but you can adjust it if necessary.";
-	ui_category = "Image Softening";
-> = 0.999;
+// uniform float ESMAABackgroundDepth <
+// 	ui_type = "slider";
+// 	ui_min = 0.8; ui_max = 0.999; ui_step = 0.001;
+// 	ui_label = "Background threshold";
+// 	ui_spacing = 2;
+// 	ui_tooltip = "The maximum depth where softening is performed. Pixels at greater depth than this \n"
+// 				 "are considered part of the background texture and will be skipped. The default should\n"
+// 				 " work fine for most games, but you can adjust it if necessary.";
+// 	ui_category = "Image Softening";
+// > = 0.999;
 
-uniform float ESMAASofteningStrength <
-	ui_type = "slider";
-	ui_min = 0.05; ui_max = 1.0; ui_step = 0.01;
-	ui_label = "Blend modifier";
-	ui_spacing = 2;
-	ui_tooltip = "The degree to which a pixel is blended with the surrounding pixels.\n"
-				 "Higher values = more softening, especially on more anomalous pixels.";
+uniform int ESMAAAnomalousPixelBlendingStrengthMethod < __UNIFORM_COMBO_INT1
 	ui_category = "Image Softening";
-> = 0.9;
+	ui_items = "Strongly favor precision\0Favor precision\0Balanced\0Favor softening\0Strongly favor softening\0";
+	ui_label = "Softening method";
+	ui_tooltip = "This determines how the degree by which a pixel differs from it's surroundings is calculated.\n"
+				 "\n"
+				 "Methods that favor precision are conservative and only target the bigger outliers.\n"
+				 "Recommended for people who like crisp images and just want to filter out extremes.\n"
+				 "\n"
+				 "Methods that favor softening are aggressive and even target pixels that differ slightly.\n"
+				 "Recommended for people who like smooth images and don't mind risking blurriness.";
+> = 2;
+
+uniform int ESMAAAnomalousPixelScaling < __UNIFORM_COMBO_INT1
+	ui_items = "Subtle\0Balanced\0Agressive\0";
+	ui_label = "Strength scaling";
+	ui_tooltip = "This determines how softening strength scales with the degree\n"
+				"by which a pixel differs from it's surroundings.";
+	ui_category = "Image Softening";
+> = 1;
+
+uniform int ESMAADivider <
+	ui_category = "Image Softening";
+	ui_type = "radio";
+	ui_label = " ";
+>;
 
 uniform float ESMAASofteningBaseStrength <
 	ui_type = "slider";
 	ui_min = 0.0; ui_max = 0.5; ui_step = 0.01;
-	ui_label = "Minimum strength";
+	ui_label = "Minimum blending";
 	ui_tooltip = "The minimum amount amount of blending./n"
 				 "Higher values = more softening, even on less anomalous pixels";
 	ui_category = "Image Softening";
-> = 0.35;
+> = 0.15;
+
+uniform float ESMAASofteningStrength <
+	ui_type = "slider";
+	ui_min = 0.05; ui_max = 1.0; ui_step = 0.01;
+	ui_label = "Blending strength";
+	ui_tooltip = "The degree in which the final result is blended with the image.\n"
+				 "Lower values = weaker effect.";
+	ui_category = "Image Softening";
+> = 1.0;
 
 #ifdef SMAA_PRESET_CUSTOM
 	#define SMAA_THRESHOLD EdgeDetectionThreshold
@@ -117,17 +141,6 @@ uniform float ESMAASofteningBaseStrength <
 
 #define SMAA_RT_METRICS float4(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT, BUFFER_WIDTH, BUFFER_HEIGHT)
 #define SMAA_CUSTOM_SL 1
-#define __HQAA_CONST_HALFROOT2 0.707107
-#define __HQAA_BUFFER_MULT saturate(BUFFER_HEIGHT / 1440.)
-#define __HQAA_THRESHOLD_FLOOR 0.0361
-#define __HQAA_EDGE_THRESHOLD clamp(HqaaEdgeThresholdCustom, __HQAA_THRESHOLD_FLOOR, 1.00)
-#define __HQAA_LUMA_REF float3(0.2126, 0.7152, 0.0722)
-
-#define __TSMAA_BUFFER_INFO float4(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT, BUFFER_WIDTH, BUFFER_HEIGHT)
-
-// #define HQAA_Tex2D(tex, coord) tex2Dlod(tex, (coord).xyxy)
-// #define TSMAA_Tex2D(tex, coord) tex2Dlod(tex, (coord).xyxy)
-// #define TSMAA_DecodeTex2DOffset(tex, coord, offset) tex2Dlodoffset(tex, (coord).xyxy, offset)
 
 #define SMAATexture2D(tex) sampler tex
 #define SMAATexturePass2D(tex) tex
@@ -140,10 +153,13 @@ uniform float ESMAASofteningBaseStrength <
 #define SMAA_BRANCH [branch]
 #define SMAA_FLATTEN [flatten]
 
+// depths greater than this are considered part of the background/skybox
+#define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
 
 #define ESMAAmax4(w,x,y,z) max(max(w,x),max(y,z))
 #define ESMAAmax9(r,s,t,u,v,w,x,y,z) max(max(max(max(r,s),t),max(u,v)),max(max(w,x),max(y,z)))
 
+#define ESMAAmin4(w,x,y,z) min(min(w,x),min(y,z))
 #define ESMAAmin9(r,s,t,u,v,w,x,y,z) min(min(min(min(r,s),t),min(u,v)),min(min(w,x),min(y,z)))
 
 #if (__RENDERER__ == 0xb000 || __RENDERER__ == 0xb100)
@@ -226,7 +242,79 @@ sampler searchSampler
 	SRGBTexture = false;
 };
 
-// Vertex shaders
+float sum(float4 vc){
+	return vc.x + vc.y + vc.z + vc.w;
+}
+
+float avg(float4 vc){
+	return sum(vc) / 4.0;
+}
+
+// Used in the Softening pass to calculate the blending strength based
+float getBlendingStrength(float4 weightData, float weightAvg, float edgeAvg){
+	float strength;
+	if(ESMAAAnomalousPixelBlendingStrengthMethod == 1)
+	{
+		float maxWeight = ESMAAmax4(weightData.r, weightData.g, weightData.b, weightData.a);
+		strength = weightAvg * 0.4 + maxWeight * 0.6;
+	} 
+	else if(ESMAAAnomalousPixelBlendingStrengthMethod==2)
+	{
+		float maxWeight = ESMAAmax4(weightData.r, weightData.g, weightData.b, weightData.a);
+		strength = weightAvg * 0.7 + maxWeight * 0.3;
+		strength = edgeAvg  * 0.2 + strength * 0.8;
+	}
+	else if(ESMAAAnomalousPixelBlendingStrengthMethod==3)
+	{
+		float maxWeight = ESMAAmax4(weightData.r, weightData.g, weightData.b, weightData.a);
+		strength = weightAvg * 0.4 + maxWeight * 0.6;
+		strength = edgeAvg  * 0.3 + strength * 0.7;
+	}
+	else if(ESMAAAnomalousPixelBlendingStrengthMethod==4)
+	{
+		float maxWeight = ESMAAmax4(weightData.r, weightData.g, weightData.b, weightData.a);
+		strength = (edgeAvg  + maxWeight)/2.0;
+	} 
+	else {
+		strength = weightAvg;
+	}
+	return strength;
+}
+
+/**
+ * @SCALE_LINEAR
+ * Meant for turning linear values super-linear: Makes it's input bigger in such a way that lower values become 
+ * proportionally bigger than higher values. Output never exceeds 1.0;
+ *
+ * @param `val` input to be scaled
+ * @return output val. Amplified in a non-linear fashion.
+ */
+float scale(float val){
+    const float piHalf = 1.5707;
+	return val = sin(val * piHalf);
+}
+
+/** 
+ * Optionally scales the blending strength (ssee @SCALE_LINEAR).
+ * Scaling depends on the value of `ESMAAAnomalousPixelScaling`.
+ * 
+ * @param `strength` The linear input strength 
+ * @return The output strength. Same as input strength when `ESMAAAnomalousPixelScaling` is below 1.
+ * 		   Amplified in a non-linear fashion when `ESMAAAnomalousPixelScaling` >= 1
+ */
+float scaleStrength(float strength){
+	if(ESMAAAnomalousPixelScaling >= 1){ // Balanced
+		// strength = strength * (2.0 - strength); // Tests turned out this was slower
+		strength = scale(strength);
+	}
+	// no else-if, because it is a cumulative effect
+	if(ESMAAAnomalousPixelScaling >= 2){ // Aggressive
+		strength = scale(strength);
+	}
+	return strength;
+}
+
+//////////////////////////////// VERTEX SHADERS ////////////////////////////////
 
 void SMAAEdgeDetectionWrapVS(
 	in uint id : SV_VertexID,
@@ -257,7 +345,20 @@ void SMAANeighborhoodBlendingWrapVS(
 	SMAANeighborhoodBlendingVS(texcoord, offset);
 }
 
-// Pixel shaders
+/**
+ * Taken from Lordbean's TSMAA shader. For more credits, see description above.
+ */
+void ESMAABlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position, out float2 texcoord : TEXCOORD0, out float4 offset : TEXCOORD1)
+{
+	texcoord.x = (id == 2) ? 2.0 : 0.0;
+	texcoord.y = (id == 1) ? 2.0 : 0.0;
+	position = float4(texcoord * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    offset = mad(SMAA_RT_METRICS.xyxy, float4( 1.0, 0.0, 0.0,  1.0), texcoord.xyxy);
+	// offset.xy -> pixel to the left
+	// offset.zw -> pixel to the bottom
+}
+
+//////////////////////////////// PIXEL SHADERS ////////////////////////////////
 
 float2 SMAAEdgeDetectionWrapPS(
 	float4 position : SV_Position,
@@ -301,65 +402,71 @@ float3 SMAANeighborhoodBlendingWrapPS(
 
 	return SMAANeighborhoodBlendingPS(texcoord, offset, colorLinearSampler, blendSampler).rgb;
 }
-void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position, out float2 texcoord : TEXCOORD0, out float4 offset : TEXCOORD1)
-{
-	texcoord.x = (id == 2) ? 2.0 : 0.0;
-	texcoord.y = (id == 1) ? 2.0 : 0.0;
-	position = float4(texcoord * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
-    offset = mad(__TSMAA_BUFFER_INFO.xyxy, float4( 1.0, 0.0, 0.0,  1.0), texcoord.xyxy);
-	// offset.xy -> pixel to the left
-	// offset.zw -> pixel to the bottom
-}
 
+/**
+ * A modified version of Lordbean's Softening pass, taken from his TSMAA shader.
+ * It works by averaging divergent pixels with their surroundings.
+ * 
+ * - modified the way weights are collected, by only collecting from the current pixel
+ * - removed detection of horizontal pixels, as it didn't make a difference visually
+ * - added edge data to be considered as well
+ * - Boosted the contribution that weight and edge data use to the final blending strength
+ * - added several different, optional ways to determine blend strength from edge and weight data
+ * 
+ * For more credits, see description above.
+ */
 float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
 {
 	float3 a, b, c, d;
 	
-	float4 m = SMAASampleLevelZero(blendSampler, texcoord).xyzw;
-	// original weight measurements and horizontal
-	// m = float4(
-	// 	SMAASampleLevelZero(blendSampler, offset.xy).a, 
-	// 	SMAASampleLevelZero(blendSampler, offset.zw).g, 
-	// 	SMAASampleLevelZero(blendSampler, texcoord).zx
+	// The way this data is collected is probably wrong, considering official SMAA code does it differently. 
+	// weightData for instance should be something like:
+	// float4 weightData = float4(
+	// 	SMAASampleLevelZero(blendSampler, offset.xy).a, // Right
+	// 	SMAASampleLevelZero(blendSampler, offset.zw).g, // Top
+	// 	SMAASampleLevelZero(blendSampler, texcoord).xz // Bottom / Left
 	// ); 
-	// Use weight data to find out if the pixel is part of a horizontal structure.
-	// horiz = max(m.x, m.z) > max(m.y, m.w);
+	// but for some reason, the below implementation seems to yield better results as far as I can see.
+	// TODO: See if these two can be replaced with something that makes sense
+	float4 weightData = SMAASampleLevelZero(blendSampler, texcoord).xyzw;
+	float4 edgeData = float4(
+		SMAASampleLevelZero(edgesSampler, texcoord).rg,
+		SMAASampleLevelZero(edgesSampler, offset.xy).r, 
+		SMAASampleLevelZero(edgesSampler, offset.zw).g
+	); 
 
-    bool noDelta = dot(m, float4(1,1,1,1)) == 0.0;
+	float weightSum = sum(weightData);
+	float edgeSum = sum(edgeData);
+    bool noDelta = (weightSum + edgeSum) == 0.0;
 
+	// If background softening is disabled, return early if 
+	// the pixel's depth corresponds with the background depth.
 	float depth = ReShade::GetLinearizedDepth(texcoord);
-	bool background = depth > ESMAABackgroundDepth;
-	bool earlyExit = !ESMAAEnableSoftening || noDelta || background;
-	// bool earlyExit = !ESMAAEnableSoftening || noDelta;
-	// if(earlyExit){ // this was actually less performant for some reason
-	// 	discard;
-	// }
-	// float maxblending = ESMAASofteningStrength + (TsmaaBlendCalcBalance * jitteroffset * ESMAAmax4(m.r, m.g, m.b, m.a)) + ((1 - TsmaaBlendCalcBalance) * jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0));
-	// float maxblending = ESMAASofteningStrength + (0.8 * jitteroffset * ESMAAmax4(m.r, m.g, m.b, m.a)) + (0.2 * jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0));
+	bool background = ESMAADisableBackgroundSoftening && depth > ESMAA_BACKGROUND_DEPTH_THRESHOLD;
 
-	// float jitteroffset = 1.0 - min(ESMAASofteningStrength * 2.0, 0.5);
-	// using both the max of m and avg of m made little difference. avg of m was slightly better at preserving detail, so I went with that.
-	// float maxblending = ESMAASofteningStrength + (jitteroffset * (dot(m, float4(1,1,1,1)) / 4.0)); 
+
+	bool earlyReturn = !ESMAAEnableSoftening || noDelta || background;
 	
 // pattern:
 //  e f g
 //  h a b
 //  i c d
 
-#if __RENDERER__ >= 0xa000
+#if __RENDERER__ >= 0xa000 // if DX10 or above
+	// get RGB values from the c, d, b, and a positions, in order.
 	float4 cdbared = tex2Dgather(ReShade::BackBuffer, texcoord, 0);
 	float4 cdbagreen = tex2Dgather(ReShade::BackBuffer, texcoord, 1);
 	float4 cdbablue = tex2Dgather(ReShade::BackBuffer, texcoord, 2);
 	a = float3(cdbared.w, cdbagreen.w, cdbablue.w);
 	float3 original = a;
-	if (earlyExit) return original;
+	if (earlyReturn) return original;
 	b = float3(cdbared.z, cdbagreen.z, cdbablue.z);
 	c = float3(cdbared.x, cdbagreen.x, cdbablue.x);
 	d = float3(cdbared.y, cdbagreen.y, cdbablue.y);
-#else
+#else // if DX9
 	a = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
 	float3 original = a;
-	if (earlyExit) return original;
+	if (earlyReturn) return original;
 	b = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, 0)).rgb;
 	c = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(0, 1)).rgb;
 	d = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, 1)).rgb;
@@ -370,53 +477,34 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 h = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb;
 	float3 i = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb;
 	
+	// Various shapes that can be present
 	float3 x1 = (e + f + g) / 3.0;
 	float3 x2 = (h + a + b) / 3.0;
 	float3 x3 = (i + c + d) / 3.0;
 	float3 cap = (h + e + f + g + b) / 5.0;
 	float3 bucket = (h + i + c + d + b) / 5.0;
-
-	// if (!horiz)
-	// {
-	// 	x1 = (e + h + i) / 3.0;
-	// 	x2 = (f + a + c) / 3.0;
-	// 	x3 = (g + b + d) / 3.0;
-	// 	cap = (f + e + h + i + c) / 5.0;
-	// 	bucket = (f + g + b + d + c) / 5.0;
-	// }
 	float3 xy1 = (e + a + d) / 3.0;
 	float3 xy2 = (i + a + g) / 3.0;
 	float3 diamond = (h + f + c + b) / 4.0;
 	float3 square = (e + g + i + d) / 4.0;
 	
+	// Get the most divergent shapes..
 	float3 highterm = ESMAAmax9(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
 	float3 lowterm = ESMAAmin9(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
-	
+	// ...and subtract them from the average of all shapes
 	float3 localavg = ((a + x1 + x2 + x3 + xy1 + xy2 + diamond + square + cap + bucket) - (highterm + lowterm)) / 8.0;
 
-	
-	float maxblending;
-	float weight;
-	if(ESMAAAvgDiffBasedSoftening){
-		const float piHalf = 1.5707;
-		weight = dot(m, float4(1,1,1,1)) / 4.0;
-		weight = weight * (2.0 - weight);
-		weight = sin(weight * piHalf);
-	} else {
-		weight = ESMAAmax4(m.r, m.g, m.b, m.a);
-		weight = weight * (2.0 - weight);
-	}
-	maxblending = (ESMAASofteningBaseStrength + ((1-ESMAASofteningBaseStrength) * weight)) * ESMAASofteningStrength;
+	float weightAvg = weightSum / 4.0;
+	float edgeAvg = edgeSum / 4.0;
+
+	// Calculate blend strength based on weight and edge data
+	float strength = getBlendingStrength(weightData, weightAvg, edgeAvg);
+	// Optional scaling, so less deviant pixels get softened too
+	float scaledStrength = scaleStrength(strength);
+	float maxblending = (ESMAASofteningBaseStrength + ((1-ESMAASofteningBaseStrength) * scaledStrength)) * ESMAASofteningStrength;
 	
 	return lerp(original, localavg, maxblending);
 }
-
-// float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target{
-// 	if(TSMAASofteningTest){
-// 		return TSMAASofteningPS(vpos,texcoord,offset);
-// 	}
-// 	return HQAASofteningPS(vpos, texcoord);
-// }
 
 // Rendering passes
 
@@ -452,7 +540,7 @@ technique ESMAA
 	}
 	pass ImageSoftening
 	{
-		VertexShader = TSMAANeighborhoodBlendingVS;
+		VertexShader = ESMAABlendingVS;
 		PixelShader = ESMAASofteningPS;
 	}
 }
