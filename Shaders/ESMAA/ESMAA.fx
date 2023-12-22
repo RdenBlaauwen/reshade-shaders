@@ -67,6 +67,20 @@ uniform bool ESMAAEnableAdaptiveThresholdExtraPrecision <
 	ui_label = "adaptive threshold extra precision";
 > = false;
 
+uniform float ESMAAthreshScaleFloor <
+	ui_type = "slider";
+	ui_label = "threshScaleFloor";
+	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
+	ui_tooltip = "Low values preserve detail, high values increase anti-aliasing effect";
+> = 0.15;
+
+uniform float ESMAAScalethreshMult <
+	ui_type = "slider";
+	ui_label = "ScalethreshMult";
+	ui_min = 0.0; ui_max = 5.0; ui_step = 0.1;
+	ui_tooltip = "Low values preserve detail, high values increase anti-aliasing effect";
+> = 2.0;
+
 uniform int DebugOutput < __UNIFORM_COMBO_INT1
 	ui_items = "None\0View edges\0View weights\0";
 	ui_label = "Debug Output";
@@ -369,6 +383,16 @@ void ESMAABlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position
 }
 
 //////////////////////////////// PIXEL SHADERS (MUST BE WRAPPED) ////////////////////////////////
+
+/**
+ * Used in edge detection methods to adapt threshold to magnitude of max local luma
+ */
+float scaleThreshold(float localLuma){
+	// const float threshScaleFloor = 0.15;
+	const float threshScaleFloor = ESMAAthreshScaleFloor;
+	float scaling = max(threshScaleFloor, saturate(localLuma * ESMAAScalethreshMult));
+	return SMAA_THRESHOLD * scaling;
+}
 /**
  * Luma Edge Detection
  *
@@ -386,18 +410,16 @@ float2 CustomLumaEdgeDetectionPS(float2 texcoord,
     float Lleft = dot(SMAASamplePoint(colorTex, offset[0].xy).rgb, weights);
     float Ltop  = dot(SMAASamplePoint(colorTex, offset[0].zw).rgb, weights);
 
-		float maxLuma = max(L, max(Lleft, Ltop));
-		float2 threshold;
-		if(ESMAAEnableAdaptiveThreshold){
-			// scaled maxLuma so that only dark places have a significantly lower threshold
-			maxLuma = scale(maxLuma);
-
-			// Calculate the threshold
-			// Multiplying by maxLuma should scale the threshold according to the maximum local brightness
-    	threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD) * maxLuma;
-		} else {
-    	threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
-		}
+	float maxLuma = max(L, max(Lleft, Ltop));
+	float2 threshold;
+	if(ESMAAEnableAdaptiveThreshold){
+		// Calculate the threshold
+		// Multiplying by maxLuma should scale the threshold according to the maximum local brightness
+		// scaled maxLuma so that only dark places have a significantly lower threshold
+		threshold = float(scaleThreshold(maxLuma)).xx;
+	} else {
+		threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
+	}
 
     // We do the usual threshold:
     float4 delta;
@@ -421,24 +443,22 @@ float2 CustomLumaEdgeDetectionPS(float2 texcoord,
     float Ltoptop = dot(SMAASamplePoint(colorTex, offset[2].zw).rgb, weights);
     delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
 
+	if(ESMAAEnableAdaptiveThresholdExtraPrecision){
+		// take ALL lumas into account this time
+		float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
+		// scaled maxLuma so that only dark places have a significantly lower threshold
+		// Calculate the threshold
+		// Multiplying by maxLuma should scale the threshold according to the maximum local brightness
+		threshold = float(scaleThreshold(finalMaxLuma)).xx;
+		edges = step(threshold, delta.xy);
+	}
+
     // Calculate the final maximum delta:
     maxDelta = max(maxDelta.xy, delta.zw);
     float finalDelta = max(maxDelta.x, maxDelta.y);
 
     // Local contrast adaptation:
     edges.xy *= step(finalDelta, SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR * delta.xy);
-
-		if(ESMAAEnableAdaptiveThresholdExtraPrecision){
-			// take ALL lumas into account this time
-			float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
-			// scaled maxLuma so that only dark places have a significantly lower threshold
-			finalMaxLuma = scale(finalMaxLuma);
-
-			// Calculate the threshold
-			// Multiplying by maxLuma should scale the threshold according to the maximum local brightness
-    	threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD) * finalMaxLuma;
-    	edges = step(threshold, delta.xy);
-		}
 
     return edges;
 }
@@ -457,9 +477,9 @@ float2 SMAAEdgeDetectionWrapPS(
 	else if (EdgeDetectionType == 2)
 		return (SMAAColorEdgeDetectionPS(texcoord, offset, colorGammaSampler) && SMAALumaEdgeDetectionPS(texcoord, offset, colorGammaSampler));
 	else if (EdgeDetectionType == 3)
-		return CustomLumaEdgeDetectionPS(texcoord, offset, colorGammaSampler);
-	else
 		return ((SMAALumaEdgeDetectionPS(texcoord, offset, colorGammaSampler) + SMAAColorEdgeDetectionPS(texcoord, offset, colorGammaSampler))/2);
+	else
+		return CustomLumaEdgeDetectionPS(texcoord, offset, colorGammaSampler);
 }
 
 float4 TestBlendingWeightPS(float2 texcoord : TEXCOORD0) : SV_TARGET
