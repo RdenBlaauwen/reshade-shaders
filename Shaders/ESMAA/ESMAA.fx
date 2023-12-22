@@ -23,9 +23,10 @@
 #include "ReShadeUI.fxh"
 
 uniform int EdgeDetectionType < __UNIFORM_COMBO_INT1
-	ui_items = "Luminance edge detection\0Color edge detection\0Both, biasing Clarity\0Both, biasing Anti-Aliasing\0";
+	ui_items = "Luminance edge detection\0Color edge detection\0Both, biasing Clarity\0Both, biasing Anti-Aliasing\0Experimental adaptive luma\0";
 	ui_label = "Edge Detection Type";
-> = 3;
+	ui_tooltip = "Experimental adaptive luma only does special stuff if you enable adaptive threshold stuff";
+> = 4;
 
 #ifdef SMAA_PRESET_CUSTOM
 uniform float EdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
@@ -58,6 +59,14 @@ uniform float ContrastAdaptationFactor < __UNIFORM_DRAG_FLOAT1
 > = 1.60;
 #endif
 
+uniform bool ESMAAEnableAdaptiveThreshold <
+	ui_label = "Enable adaptive threshold";
+> = false;
+
+uniform bool ESMAAEnableAdaptiveThresholdExtraPrecision <
+	ui_label = "adaptive threshold extra precision";
+> = false;
+
 uniform int DebugOutput < __UNIFORM_COMBO_INT1
 	ui_items = "None\0View edges\0View weights\0";
 	ui_label = "Debug Output";
@@ -74,6 +83,7 @@ uniform bool ESMAADisableBackgroundSoftening <
 	ui_tooltip = "This lets the shader skip the sky/background/skybox.\n"
 				 "Only works if ReShade has access to this game's depth buffer.";
 > = true;
+
 
 // uniform float ESMAABackgroundDepth <
 // 	ui_type = "slider";
@@ -358,7 +368,82 @@ void ESMAABlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position
 	// offset.zw -> pixel to the bottom
 }
 
-//////////////////////////////// PIXEL SHADERS ////////////////////////////////
+//////////////////////////////// PIXEL SHADERS (MUST BE WRAPPED) ////////////////////////////////
+/**
+ * Luma Edge Detection
+ *
+ * IMPORTANT NOTICE: luma edge detection requires gamma-corrected colors, and
+ * thus 'colorTex' should be a non-sRGB texture.
+ */
+float2 CustomLumaEdgeDetectionPS(float2 texcoord,
+                               float4 offset[3],
+                               SMAATexture2D(colorTex)
+                               ) {
+    // Calculate lumas:
+    float3 weights = float3(0.2126, 0.7152, 0.0722);
+    float L = dot(SMAASamplePoint(colorTex, texcoord).rgb, weights);
+
+    float Lleft = dot(SMAASamplePoint(colorTex, offset[0].xy).rgb, weights);
+    float Ltop  = dot(SMAASamplePoint(colorTex, offset[0].zw).rgb, weights);
+
+		float maxLuma = max(L, max(Lleft, Ltop));
+		float2 threshold;
+		if(ESMAAEnableAdaptiveThreshold){
+			// scaled maxLuma so that only dark places have a significantly lower threshold
+			maxLuma = scale(maxLuma);
+
+			// Calculate the threshold
+			// Multiplying by maxLuma should scale the threshold according to the maximum local brightness
+    	threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD) * maxLuma;
+		} else {
+    	threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
+		}
+
+    // We do the usual threshold:
+    float4 delta;
+    delta.xy = abs(L - float2(Lleft, Ltop));
+    float2 edges = step(threshold, delta.xy);
+
+    // Then discard if there is no edge:
+    if (dot(edges, float2(1.0, 1.0)) == 0.0)
+        discard;
+
+    // Calculate right and bottom deltas:
+    float Lright = dot(SMAASamplePoint(colorTex, offset[1].xy).rgb, weights);
+    float Lbottom  = dot(SMAASamplePoint(colorTex, offset[1].zw).rgb, weights);
+    delta.zw = abs(L - float2(Lright, Lbottom));
+
+    // Calculate the maximum delta in the direct neighborhood:
+    float2 maxDelta = max(delta.xy, delta.zw);
+
+    // Calculate left-left and top-top deltas:
+    float Lleftleft = dot(SMAASamplePoint(colorTex, offset[2].xy).rgb, weights);
+    float Ltoptop = dot(SMAASamplePoint(colorTex, offset[2].zw).rgb, weights);
+    delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
+
+    // Calculate the final maximum delta:
+    maxDelta = max(maxDelta.xy, delta.zw);
+    float finalDelta = max(maxDelta.x, maxDelta.y);
+
+    // Local contrast adaptation:
+    edges.xy *= step(finalDelta, SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR * delta.xy);
+
+		if(ESMAAEnableAdaptiveThresholdExtraPrecision){
+			// take ALL lumas into account this time
+			float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
+			// scaled maxLuma so that only dark places have a significantly lower threshold
+			finalMaxLuma = scale(finalMaxLuma);
+
+			// Calculate the threshold
+			// Multiplying by maxLuma should scale the threshold according to the maximum local brightness
+    	threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD) * finalMaxLuma;
+    	edges = step(threshold, delta.xy);
+		}
+
+    return edges;
+}
+
+//////////////////////////////// PIXEL SHADERS (WRAPPERS) ////////////////////////////////
 
 float2 SMAAEdgeDetectionWrapPS(
 	float4 position : SV_Position,
@@ -371,6 +456,8 @@ float2 SMAAEdgeDetectionWrapPS(
 		return SMAAColorEdgeDetectionPS(texcoord, offset, colorGammaSampler);
 	else if (EdgeDetectionType == 2)
 		return (SMAAColorEdgeDetectionPS(texcoord, offset, colorGammaSampler) && SMAALumaEdgeDetectionPS(texcoord, offset, colorGammaSampler));
+	else if (EdgeDetectionType == 3)
+		return CustomLumaEdgeDetectionPS(texcoord, offset, colorGammaSampler);
 	else
 		return ((SMAALumaEdgeDetectionPS(texcoord, offset, colorGammaSampler) + SMAAColorEdgeDetectionPS(texcoord, offset, colorGammaSampler))/2);
 }
