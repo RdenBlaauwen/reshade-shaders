@@ -72,14 +72,14 @@ uniform float ESMAAthreshScaleFloor <
 	ui_label = "threshScaleFloor";
 	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
 	ui_tooltip = "Low values preserve detail, high values increase anti-aliasing effect";
-> = 0.15;
+> = 0.12;
 
 uniform float ESMAAScalethreshMult <
 	ui_type = "slider";
 	ui_label = "ScalethreshMult";
 	ui_min = 0.0; ui_max = 5.0; ui_step = 0.1;
 	ui_tooltip = "Low values preserve detail, high values increase anti-aliasing effect";
-> = 2.0;
+> = 3.0;
 
 uniform int DebugOutput < __UNIFORM_COMBO_INT1
 	ui_items = "None\0View edges\0View weights\0";
