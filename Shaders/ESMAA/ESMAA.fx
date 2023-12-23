@@ -58,6 +58,13 @@ uniform int DebugOutput < __UNIFORM_COMBO_INT1
 	ui_label = "Debug Output";
 > = false;
 
+uniform bool ESMAAEnableSMAABlending <
+	ui_label = "Enable SMAA blending";
+	ui_tooltip = "Calculates the final result for SMAA. Turning this off stops SMAA from doing\n"
+				 "actual anti-aliasing, but won't stop it from detecting edges and calculating weights.\n"
+				 "Turning this off won't affect other effects.";
+> = true;
+
 uniform bool ESMAAEnableLumaEdgeDetection <
 	ui_category = "Edge Detection";
 	ui_label = "EnableLumaEdgeDetection";
@@ -731,8 +738,11 @@ float3 SMAANeighborhoodBlendingWrapPS(
 		return tex2D(edgesSampler, texcoord).rgb;
 	if (DebugOutput == 2)
 		return tex2D(blendSampler, texcoord).rgb;
+	if(ESMAAEnableSMAABlending)
+		return SMAANeighborhoodBlendingPS(texcoord, offset, colorLinearSampler, blendSampler).rgb;
 
-	return SMAANeighborhoodBlendingPS(texcoord, offset, colorLinearSampler, blendSampler).rgb;
+	// Return the original color if nothing is turned on
+	return SMAASampleLevelZero(colorLinearSampler, texcoord);
 }
 
 //////////////////////////////////////////////////////// SMOOTHING ////////////////////////////////////////////////////////////////////////
