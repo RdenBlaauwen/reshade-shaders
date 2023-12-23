@@ -501,20 +501,30 @@ void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position :
 	// offset.zw -> pixel to the bottom
 }
 
-//////////////////////////////// PIXEL SHADERS (MUST BE WRAPPED) ////////////////////////////////
+//////////////////////////////// EDGE DETECTION FUNCTIONS (MUST BE WRAPPED) ////////////////////////////////
 
 /**
- * Used in edge detection methods to adapt threshold to magnitude of max local luma
+ * Used in edge detection methods to adapt threshold to magnitude of local pixels
+ * Scales the input value so that lower and middle values get relatively bigger.
+ * Useful for situation where extreme values shouldn't have a disproportionate effect.
+ * Result is clamped between threshold floor and 1.0.
+ * 
+ * @param input some factor with a value of threshold floor 0.0 - 1.0, used to scale the threshold
+ * 	Can be somehting like a luma or an rgb component
+ * @return float2 with the scaled threshold twice, for easy use in edge thresholding
  */
-float scaleThreshold(float localLuma){
-	// const float threshScaleFloor = 0.15;
-	const float threshScaleFloor = ESMAAThresholdFloor;
-	float scaling = max(threshScaleFloor, saturate(localLuma * ESMAAThreshScaleFactor));
-	return SMAA_THRESHOLD * scaling;
+float2 getScaledThreshold(float input){
+	float scaled = saturate(input * ESMAAThreshScaleFactor);
+	// Makes ESMAAThresholdFloor the minimum value
+	float scaledAndFloored = max(ESMAAThresholdFloor, scaled);
+	float scaledThreshold = SMAA_THRESHOLD * scaledAndFloored;
+	return float2(scaledThreshold).xx;
 }
 
 /**
- * Luma Edge Detection
+ * Luma Edge Detection taken and adapted from the official SMAA.fxh file, provided by the original team. (TODO: fix credits)
+ * Adapted to use adaptive thresholding. 
+ * Does early return of edges instead of discarding, so that other detection methods can take over.
  *
  * IMPORTANT NOTICE: luma edge detection requires gamma-corrected colors, and
  * thus 'colorTex' should be a non-sRGB texture.
@@ -523,23 +533,26 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
                                float4 offset[3],
                                SMAATexture2D(colorTex)
                                ) {
-    // Calculate lumas:
-    float3 weights = float3(0.2126, 0.7152, 0.0722);
-    float L = dot(SMAASamplePoint(colorTex, texcoord).rgb, weights);
+	// Calculate lumas:
+	float3 weights = float3(0.2126, 0.7152, 0.0722);
+	float L = dot(SMAASamplePoint(colorTex, texcoord).rgb, weights);
 
-    float Lleft = dot(SMAASamplePoint(colorTex, offset[0].xy).rgb, weights);
-    float Ltop  = dot(SMAASamplePoint(colorTex, offset[0].zw).rgb, weights);
+	float Lleft = dot(SMAASamplePoint(colorTex, offset[0].xy).rgb, weights);
+	float Ltop  = dot(SMAASamplePoint(colorTex, offset[0].zw).rgb, weights);
 
-	float maxLuma = max(L, max(Lleft, Ltop));
+	// ADAPTIVE THRESHOLD START
+	float maxLuma;
 	float2 threshold;
 	if(ESMAAEnableAdaptiveThreshold){
-		// Calculate the threshold
-		// Multiplying by maxLuma should scale the threshold according to the maximum local brightness
+		// use biggest local luma as basis
+		maxLuma = max(L, max(Lleft, Ltop))
 		// scaled maxLuma so that only dark places have a significantly lower threshold
-		threshold = float(scaleThreshold(maxLuma)).xx;
+		threshold = getScaledThreshold(maxLuma);
 	} else {
 		threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
 	}
+
+	// ADAPTIVE THRESHOLD END
 
     // We do the usual threshold:
     float4 delta;
@@ -563,16 +576,18 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
     float Ltoptop = dot(SMAASamplePoint(colorTex, offset[2].zw).rgb, weights);
     delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
 
+	// ADAPTIVE THRESHOLD second threshold check
+
 	if(ESMAAEnableAdaptiveThreshold){
-		// take ALL lumas into account this time
+		// get the greates from  ALL lumas this time
 		float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
 		// scaled maxLuma so that only dark places have a significantly lower threshold
-		// Calculate the threshold
-		// Multiplying by maxLuma should scale the threshold according to the maximum local brightness
-		threshold = float(scaleThreshold(finalMaxLuma)).xx;
-		// edges = step(threshold, delta.xy);
+		threshold = getScaledThreshold(finalMaxLuma);
+		// edges set to 1 if delta greater than threshold, else set to 0
 		edges = step(threshold, delta.xy);
 	}
+
+	// ADAPTIVE THRESHOLD second threshold check END
 
     // Calculate the final maximum delta:
     maxDelta = max(maxDelta.xy, delta.zw);
@@ -584,13 +599,18 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
     return edges;
 }
 
-float2 ESMAAChromaEdgeDetectionPS(float2 texcoord,
+/**
+ * Color Edge Detection taken and adapted from the official SMAA.fxh file, provided by the original team. (TODO: fix credits)
+ * Adapted to use adaptive thresholding. 
+ * Does early return of edges instead of discarding, so that other detection methods can take over.
+ *
+ * IMPORTANT NOTICE: color edge detection requires gamma-corrected colors, and
+ * thus 'colorTex' should be a non-sRGB texture.
+ */
+float2 ESMAAChromaEdgeDetection(float2 texcoord,
                                 float4 offset[3],
                                 SMAATexture2D(colorTex)
                                 ) {
-    // Calculate the threshold:
-    // float2 threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
-
     // Calculate color deltas:
     float4 delta;
     float3 C = SMAASamplePoint(colorTex, texcoord).rgb;
@@ -603,17 +623,19 @@ float2 ESMAAChromaEdgeDetectionPS(float2 texcoord,
     t = abs(C - Ctop);
     delta.y = max(max(t.r, t.g), t.b);
 
+	// ADAPTIVE THRESHOLD START
+
 	float maxChroma;
 	float2 threshold;
 	if(ESMAAEnableAdaptiveThreshold){
 		maxChroma = max(maxComp(C),max(maxComp(Cleft),maxComp(Ctop)));
-		// Calculate the threshold
-		// Multiplying by maxChroma should scale the threshold according to the maximum local brightness
-		// scaled maxChroma so that only dark places have a significantly lower threshold
-		threshold = float(scaleThreshold(maxChroma)).xx;
+		// scale maxChroma so that only dark places have a significantly lower threshold
+		threshold = getScaledThreshold(maxChroma);
 	} else {
 		threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
 	}
+
+	// ADAPTIVE THRESHOLD END
 
     // We do the usual threshold:
     float2 edges = step(threshold, delta.xy);
@@ -647,8 +669,10 @@ float2 ESMAAChromaEdgeDetectionPS(float2 texcoord,
     maxDelta = max(maxDelta.xy, delta.zw);
     float finalDelta = max(maxDelta.x, maxDelta.y);
 
+	// ADAPTIVE THRESHOLD second threshold check
+
 	if(ESMAAEnableAdaptiveThreshold){
-		// take ALL lumas into account this time
+		// take ALL greatest components into account this time
 		float finalMaxChroma = max(
 			maxChroma, 
 			max(
@@ -662,13 +686,14 @@ float2 ESMAAChromaEdgeDetectionPS(float2 texcoord,
 				)
 			)
 		);
-		// Calculate the threshold
 		// scaled finalMaxChroma so that only dark places have a significantly lower threshold
 		// Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-		threshold = float(scaleThreshold(finalMaxChroma)).xx;
+		threshold = getScaledThreshold(finalMaxChroma);
 		// edges = step(threshold, delta.xy);
 		edges = step(threshold, delta.xy);
 	}
+	
+	// ADAPTIVE THRESHOLD second threshold check END
 
     // Local contrast adaptation:
     edges.xy *= step(finalDelta, SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR * delta.xy);
@@ -676,11 +701,15 @@ float2 ESMAAChromaEdgeDetectionPS(float2 texcoord,
     return edges;
 }
 
-float2 ESMAADepthEdgeDetectionPS(
-	float2 texcoord,
-    float4 offset[3],
-    SMAATexture2D(colorTex)
-) {
+/**
+ * Depth Edge Detection taken and adapted from the official SMAA.fxh file, provided by the original team. (TODO: fix credits)
+ * Does not discard edges, so that other detection methods can take over if edges are 0 if needed.
+ * Adapted to use ReShades own depth buffer, no texture needed.
+ *
+ * TODO: implement adaptive threshold that decreases threshold for closer depths
+ */
+float2 ESMAADepthEdgeDetection(float2 texcoord, float4 offset[3]) 
+{
 	float P = ReShade::GetLinearizedDepth(texcoord);
 	float Pleft = ReShade::GetLinearizedDepth(offset[0].xy);
 	float Ptop  = ReShade::GetLinearizedDepth(offset[0].zw);
@@ -691,6 +720,9 @@ float2 ESMAADepthEdgeDetectionPS(
 }
 
 //////////////////////////////// PIXEL SHADERS (WRAPPERS) ////////////////////////////////
+/**
+ * Custom edge detection pass that uses one or more edge detection methods in succession
+ */
 float2 ESMAAHybridEdgeDetectionPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
@@ -698,26 +730,26 @@ float2 ESMAAHybridEdgeDetectionPS(
 {
 	float2 edges;
 	bool edgesFound = false;
-	if(ESMAAEnableLumaEdgeDetection){
+	if(ESMAAEnableChromaEdgeDetection){
+		edges = ESMAAChromaEdgeDetection(texcoord, offset, colorGammaSampler);
+		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
+	}
+	if(ESMAAEnableLumaEdgeDetection && !edgesFound){
 		edges = ESMAALumaEdgeDetection(texcoord, offset, colorGammaSampler);
 		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
 	}
-	if(ESMAAEnableChromaEdgeDetection && !edgesFound){
-		edges = ESMAAChromaEdgeDetectionPS(texcoord, offset, colorGammaSampler);
-		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
-	}
 	if(ESMAAEnableDepthEdgeDetection && !edgesFound){
-		edges = ESMAADepthEdgeDetectionPS(texcoord, offset, colorGammaSampler);
+		edges = ESMAADepthEdgeDetection(texcoord, offset);
 		// edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
 	}
 	// if(!edgesFound) discard;
 	return edges;
 }
 
-float4 TestBlendingWeightPS(float2 texcoord : TEXCOORD0) : SV_TARGET
-{
-	return float4(0.25,0.5,0.75,1.0);
-}
+// float4 TestBlendingWeightPS(float2 texcoord : TEXCOORD0) : SV_TARGET
+// {
+// 	return float4(0.25,0.5,0.75,1.0);
+// }
 
 float4 SMAABlendingWeightCalculationWrapPS(
 	float4 position : SV_Position,
@@ -746,6 +778,12 @@ float3 SMAANeighborhoodBlendingWrapPS(
 }
 
 //////////////////////////////////////////////////////// SMOOTHING ////////////////////////////////////////////////////////////////////////
+/**
+ * Algorithm called 'smoothing', found in Lordbean's TSMAA. 
+ * Appears to fix inconsistencies at edges by nudging pixel values towards values of nearby pixels.
+ * A little gem that combines well with SMAA, but not very performant
+ * TODO: try to optimise somehow
+ */
 float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
  {
     float4 m = float4(
@@ -764,7 +802,8 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 
 	if(!ESMAAEnableSmoothing) return original;
     
-	//TODO: ass luma buffer texture for optimisation. Both luma detection and smoothing can use this!
+	//TODO: consider using luma buffer texture for optimisation. 
+	// Both luma detection and smoothing could make use of it!
 	float lumaM = dot(middle, __TSMAA_LUMA_REF);
 	// float lumaMCopy = lumaM;
 	float chromaM = dotsat(middle);
