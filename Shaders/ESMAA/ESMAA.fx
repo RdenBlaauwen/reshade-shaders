@@ -39,10 +39,10 @@ uniform int MaxSearchSteps < __UNIFORM_SLIDER_INT1
 	ui_min = 1; ui_max = 112;
 	ui_label = "Max Search Steps";
 	ui_tooltip = "Determines the radius SMAA will search for aliased edges";
-> = 112;
+> = 32;
 
 uniform int MaxSearchStepsDiagonal < __UNIFORM_SLIDER_INT1
-	ui_min = 1; ui_max = 20;
+	ui_min = 1; ui_max = 32;
 	ui_label = "Max Search Steps Diagonal";
 	ui_tooltip = "Determines the radius SMAA will search for diagonal aliased edges";
 > = 20;
@@ -111,9 +111,9 @@ uniform float ESMAAThreshScaleFactor <
 	ui_category = "Edge Detection";
 	ui_type = "slider";
 	ui_label = "Threshold scaling factor";
-	ui_min = 1.0; ui_max = 4.0; ui_step = 0.1;
+	ui_min = 0.8; ui_max = 3.0; ui_step = 0.1;
 	ui_tooltip = "Lower values detect more in darker areas, but may cause artifacts and blur.";
-> = 2.0;
+> = 1.5;
 
 uniform float ESMAAThresholdFloor <
 	ui_type = "slider";
@@ -122,7 +122,7 @@ uniform float ESMAAThresholdFloor <
 	ui_min = 0.1; ui_max = 0.5; ui_step = 0.01;
 	ui_tooltip = "The lowest the threshold can go. Higher values help prevent artifacts and\n"
 				 "blur, but may cause the shader to miss some jaggies in darker areas";
-> = 0.16;
+> = 0.21;
 
 uniform bool ESMAAEnableSoftening <
 	ui_category = "Image Softening";
