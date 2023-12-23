@@ -152,7 +152,7 @@ uniform int ESMAAAnomalousPixelBlendingStrengthMethod < __UNIFORM_COMBO_INT1
 				 "\n"
 				 "Methods that favor softening are aggressive and even target pixels that differ slightly.\n"
 				 "Recommended for people who like smooth images and don't mind risking blurriness.";
-> = 2;
+> = 1;
 
 uniform int ESMAAAnomalousPixelScaling < __UNIFORM_COMBO_INT1
 	ui_items = "Subtle\0Balanced\0Agressive\0";
@@ -160,7 +160,7 @@ uniform int ESMAAAnomalousPixelScaling < __UNIFORM_COMBO_INT1
 	ui_tooltip = "This determines how softening strength scales with the degree\n"
 				"by which a pixel differs from it's surroundings.";
 	ui_category = "Image Softening";
-> = 1;
+> = 2;
 
 uniform int ESMAADivider <
 	ui_category = "Image Softening";
@@ -175,7 +175,7 @@ uniform float ESMAASofteningBaseStrength <
 	ui_tooltip = "The minimum amount amount of blending./n"
 				 "Higher values = more softening, even on less anomalous pixels";
 	ui_category = "Image Softening";
-> = 0.15;
+> = 0.05;
 
 uniform float ESMAASofteningStrength <
 	ui_type = "slider";
@@ -184,6 +184,33 @@ uniform float ESMAASofteningStrength <
 	ui_tooltip = "The degree in which the final result is blended with the image.\n"
 				 "Lower values = weaker effect.";
 	ui_category = "Image Softening";
+> = 1.0;
+
+uniform bool ESMAAEnableSmoothing <
+	ui_category = "Smoothing";
+	ui_label = "Enable 'smoothing' AA";
+> = true;
+
+// uniform uint ESMAASmoothingMaxIterations <
+// 	ui_category = "Smoothing";
+// 	ui_label = "Max Iterations";
+// 	ui_type = "slider";
+// 	ui_min = 20; ui_max = 30; ui_step = 1;
+// > = 20;
+
+uniform float ESMAASmoothingMinStrength <
+	ui_type = "slider";
+	ui_category = "Smoothing";
+	ui_label = "Minimum smoothing strength";
+	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
+> = 0.0;
+
+// creates max value for the `maxblending` var
+uniform float ESMAASmoothingStrengthMod <
+	ui_type = "slider";
+	ui_category = "Smoothing";
+	ui_label = "Strength modifier";
+	ui_min = 0.0; ui_max = 1.25; ui_step = 0.01;
 > = 1.0;
 
 #ifdef SMAA_PRESET_CUSTOM
@@ -211,12 +238,20 @@ uniform float ESMAASofteningStrength <
 
 // depths greater than this are considered part of the background/skybox
 #define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
+#define __TSMAA_LUMA_REF float3(0.333333, 0.333334, 0.333333)
+#define __TSMAA_EDGE_THRESHOLD (EdgeDetectionThreshold)
 
 #define ESMAAmax4(w,x,y,z) max(max(w,x),max(y,z))
+#define ESMAAmax5(v,w,x,y,z) max(max(max(v,w),x),max(y,z))
 #define ESMAAmax9(r,s,t,u,v,w,x,y,z) max(max(max(max(r,s),t),max(u,v)),max(max(w,x),max(y,z)))
 
 #define ESMAAmin4(w,x,y,z) min(min(w,x),min(y,z))
+#define ESMAAmin5(v,w,x,y,z) min(min(min(v,w),x),min(y,z))
 #define ESMAAmin9(r,s,t,u,v,w,x,y,z) min(min(min(min(r,s),t),min(u,v)),min(min(w,x),min(y,z)))
+
+
+#define ESMAAdotmax(x) max(max((x).r, (x).g), (x).b)
+#define ESMAAdotmin(x) min(min((x).r, (x).g), (x).b)
 
 #if (__RENDERER__ == 0xb000 || __RENDERER__ == 0xb100)
 	#define SMAAGather(tex, coord) tex2Dgather(tex, coord, 0)
@@ -302,8 +337,16 @@ float sum(float4 vc){
 	return vc.x + vc.y + vc.z + vc.w;
 }
 
+float sum(float3 vc){
+	return vc.x + vc.y + vc.z;
+}
+
 float avg(float4 vc){
 	return sum(vc) / 4.0;
+}
+
+float avg(float3 vc){
+	return sum(vc) / 3.0;
 }
 
 // Used in the Softening pass to calculate the blending strength based
@@ -374,6 +417,39 @@ float maxComp(float3 rgb){
 	return max(rgb.r,max(rgb.g,rgb.b));
 }
 
+//////////////////////////////////////////////////////// PIXEL INFORMATION ////////////////////////////////////////////////////////////////
+
+float dotweight(float3 middle, float3 neighbor, bool useluma, float3 weights)
+{
+	if (useluma) return dot(neighbor, weights);
+	else return dot(abs(middle - neighbor), __TSMAA_LUMA_REF);
+}
+
+//////////////////////////////////////////////////// SATURATION CALCULATIONS //////////////////////////////////////////////////////////////
+
+float dotsat(float3 x)
+{
+	float xl = dot(x, __TSMAA_LUMA_REF);
+	return ((ESMAAdotmax(x) - ESMAAdotmin(x)) / (1.0 - (2.0 * xl - 1.0) + trunc(xl)));
+}
+float dotsat(float4 x)
+{
+	return dotsat(x.rgb);
+}
+
+///////////////////////////////////////////////////// SMAA HELPER FUNCTIONS ///////////////////////////////////////////////////////////////
+
+void TSMAAMovc(bool2 cond, inout float2 variable, float2 value)
+{
+    [flatten] if (cond.x) variable.x = value.x;
+    [flatten] if (cond.y) variable.y = value.y;
+}
+void TSMAAMovc(bool4 cond, inout float4 variable, float4 value)
+{
+    TSMAAMovc(cond.xy, variable.xy, value.xy);
+    TSMAAMovc(cond.zw, variable.zw, value.zw);
+}
+
 //////////////////////////////// VERTEX SHADERS ////////////////////////////////
 
 void SMAAEdgeDetectionWrapVS(
@@ -408,7 +484,7 @@ void SMAANeighborhoodBlendingWrapVS(
 /**
  * Taken from Lordbean's TSMAA shader. For more credits, see description above.
  */
-void ESMAABlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position, out float2 texcoord : TEXCOORD0, out float4 offset : TEXCOORD1)
+void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position, out float2 texcoord : TEXCOORD0, out float4 offset : TEXCOORD1)
 {
 	texcoord.x = (id == 2) ? 2.0 : 0.0;
 	texcoord.y = (id == 1) ? 2.0 : 0.0;
@@ -659,6 +735,143 @@ float3 SMAANeighborhoodBlendingWrapPS(
 	return SMAANeighborhoodBlendingPS(texcoord, offset, colorLinearSampler, blendSampler).rgb;
 }
 
+//////////////////////////////////////////////////////// SMOOTHING ////////////////////////////////////////////////////////////////////////
+float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+ {
+    float4 m = float4(
+		SMAASampleLevelZero(blendSampler, offset.xy).a, 
+		SMAASampleLevelZero(blendSampler, offset.zw).g, 
+		SMAASampleLevelZero(blendSampler, texcoord).zx
+	);
+    bool smaahoriz = max(m.x, m.z) > max(m.y, m.w);
+    bool smaadata = dot(m, float4(1,1,1,1)) != 0.0;
+	// // The greater ESMAASmoothingMinStrength is, the lower the contribution that the max blend strength makes, and vice versa
+	// float maxblending = ESMAASmoothingMinStrength
+	// 					 + ((1.0 - ESMAASmoothingMinStrength) * ESMAAmax4(m.r, m.g, m.b, m.a));
+	float maxblending = 0.5 + (0.5 * ESMAAmax4(m.r, m.g, m.b, m.a));
+    float3 middle = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
+    float3 original = middle;
+
+	if(!ESMAAEnableSmoothing) return original;
+    
+	//TODO: ass luma buffer texture for optimisation. Both luma detection and smoothing can use this!
+	float lumaM = dot(middle, __TSMAA_LUMA_REF);
+	// float lumaMCopy = lumaM;
+	float chromaM = dotsat(middle);
+	bool useluma = lumaM > chromaM;
+	if (!useluma) lumaM = 0.0;
+	
+    float lumaS = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaN = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, __TSMAA_LUMA_REF);
+    
+    float rangeMax = ESMAAmax5(lumaS, lumaE, lumaN, lumaW, lumaM);
+    float rangeMin = ESMAAmin5(lumaS, lumaE, lumaN, lumaW, lumaM);
+	
+    float range = rangeMax - rangeMin;
+    
+	// early exit check
+	bool SMAAedge = any(SMAASampleLevelZero(edgesSampler, texcoord).rg);
+    bool earlyExit = (range < __TSMAA_EDGE_THRESHOLD) && (!SMAAedge);
+	if (earlyExit) return original;
+	
+    float lumaNW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaSE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaNE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaSW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, __TSMAA_LUMA_REF);
+	
+    bool horzSpan = (abs(mad(-2.0, lumaW, lumaNW + lumaSW)) + mad(2.0, abs(mad(-2.0, lumaM, lumaN + lumaS)), abs(mad(-2.0, lumaE, lumaNE + lumaSE)))) >= (abs(mad(-2.0, lumaS, lumaSW + lumaSE)) + mad(2.0, abs(mad(-2.0, lumaM, lumaW + lumaE)), abs(mad(-2.0, lumaN, lumaNW + lumaNE))));	
+    float lengthSign = horzSpan ? BUFFER_RCP_HEIGHT : BUFFER_RCP_WIDTH;
+    if (((horzSpan) && ((smaahoriz) && (smaadata))) || ((!horzSpan) && ((!smaahoriz) && (smaadata)))) maxblending *= 0.5;
+    else maxblending = min(maxblending * 1.5, 1.0);
+	
+	float2 lumaNP = float2(lumaN, lumaS);
+	TSMAAMovc(bool(!horzSpan).xx, lumaNP, float2(lumaW, lumaE));
+	
+    float gradientN = lumaNP.x - lumaM;
+    float gradientS = lumaNP.y - lumaM;
+    float lumaNN = lumaNP.x + lumaM;
+	
+    if (abs(gradientN) >= abs(gradientS)) lengthSign = -lengthSign;
+    else lumaNN = lumaNP.y + lumaM;
+	
+    float2 posB = texcoord;
+	
+	float texelsize = 0.5;
+
+    float2 offNP = float2(0.0, BUFFER_RCP_HEIGHT * texelsize);
+	TSMAAMovc(bool(horzSpan).xx, offNP, float2(BUFFER_RCP_WIDTH * texelsize, 0.0));
+	TSMAAMovc(bool2(!horzSpan, horzSpan), posB, float2(posB.x + lengthSign / 2.0, posB.y + lengthSign / 2.0));
+	
+    float2 posN = posB - offNP;
+    float2 posP = posB + offNP;
+    
+    float lumaEndN = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaEndP = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, __TSMAA_LUMA_REF);
+	
+    float gradientScaled = max(abs(gradientN), abs(gradientS)) * 0.25;
+    bool lumaMLTZero = mad(0.5, -lumaNN, lumaM) < 0.0;
+	
+	lumaNN *= 0.5;
+	
+    lumaEndN -= lumaNN;
+    lumaEndP -= lumaNN;
+	
+    bool doneN = abs(lumaEndN) >= gradientScaled;
+    bool doneP = abs(lumaEndP) >= gradientScaled;
+    bool doneNP;
+	
+	// 10 pixel scan distance
+	uint iterations = 0;
+	uint maxiterations = 20;
+	
+	[loop] while (iterations < maxiterations)
+	{
+		doneNP = doneN && doneP;
+		if (doneNP) break;
+		if (!doneN)
+		{
+			posN -= offNP;
+			lumaEndN = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, __TSMAA_LUMA_REF);
+			lumaEndN -= lumaNN;
+			doneN = abs(lumaEndN) >= gradientScaled;
+		}
+		if (!doneP)
+		{
+			posP += offNP;
+			lumaEndP = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, __TSMAA_LUMA_REF);
+			lumaEndP -= lumaNN;
+			doneP = abs(lumaEndP) >= gradientScaled;
+		}
+		iterations++;
+    }
+	
+	float2 dstNP = float2(texcoord.y - posN.y, posP.y - texcoord.y);
+	TSMAAMovc(bool(horzSpan).xx, dstNP, float2(texcoord.x - posN.x, posP.x - texcoord.x));
+
+	// blending amount cannot go below ESMAASmoothingMinStrength threshold
+	//TODO: consider turning this into a preprocessor value
+	maxblending = max(maxblending, ESMAASmoothingMinStrength) * ESMAASmoothingStrengthMod;
+	
+    bool goodSpan = (dstNP.x < dstNP.y) ? ((lumaEndN < 0.0) != lumaMLTZero) : ((lumaEndP < 0.0) != lumaMLTZero);
+    float pixelOffset = mad(-rcp(dstNP.y + dstNP.x), min(dstNP.x, dstNP.y), 0.5);
+    float subpixOut = pixelOffset * maxblending;
+	
+	[branch] if (!goodSpan)
+	{
+		subpixOut = mad(mad(2.0, lumaS + lumaE + lumaN + lumaW, lumaNW + lumaSE + lumaNE + lumaSW), 0.083333, -lumaM) * rcp(range); //ABC
+		subpixOut = pow(saturate(mad(-2.0, subpixOut, 3.0) * (subpixOut * subpixOut)), 2.0) * maxblending * pixelOffset; // DEFGH
+	}
+
+    float2 posM = texcoord;
+	//TODO: test if mad() function optimises this!
+	TSMAAMovc(bool2(!horzSpan, horzSpan), posM, float2(posM.x + lengthSign * subpixOut, posM.y + lengthSign * subpixOut));
+
+	return SMAASampleLevelZero(ReShade::BackBuffer, posM).rgb;
+}
+
+////////////////////////////////////////////////////////////// SOFTENING ////////////////////////////////////////////////////////////////
 /**
  * A modified version of Lordbean's Softening pass, taken from his TSMAA shader.
  * It works by averaging divergent pixels with their surroundings.
@@ -796,7 +1009,12 @@ technique ESMAA
 	}
 	pass ImageSoftening
 	{
-		VertexShader = ESMAABlendingVS;
+		VertexShader = TSMAANeighborhoodBlendingVS;
 		PixelShader = ESMAASofteningPS;
+	}
+	pass ImageSoftening
+	{
+		VertexShader = TSMAANeighborhoodBlendingVS;
+		PixelShader = TSMAASmoothingPS;
 	}
 }
