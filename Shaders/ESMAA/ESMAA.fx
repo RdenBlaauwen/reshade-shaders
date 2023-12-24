@@ -260,7 +260,7 @@ uniform float ESMAASmoothingStrengthMod <
 // depths greater than this are considered part of the background/skybox
 #define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
 #define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
-#define __TSMAA_LUMA_REF float3(0.333333, 0.333334, 0.333333)
+#define SMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722) // weights for luma calculations
 #define __TSMAA_EDGE_THRESHOLD (EdgeDetectionThreshold)
 
 #define ESMAAmax4(w,x,y,z) max(max(w,x),max(y,z))
@@ -489,14 +489,14 @@ float linearizeDepth(float depth) {
 float dotweight(float3 middle, float3 neighbor, bool useluma, float3 weights)
 {
 	if (useluma) return dot(neighbor, weights);
-	else return dot(abs(middle - neighbor), __TSMAA_LUMA_REF);
+	else return dot(abs(middle - neighbor), SMAA_LUMA_REF);
 }
 
 //////////////////////////////////////////////////// SATURATION CALCULATIONS //////////////////////////////////////////////////////////////
 
 float dotsat(float3 x)
 {
-	float xl = dot(x, __TSMAA_LUMA_REF);
+	float xl = dot(x, SMAA_LUMA_REF);
 	return ((ESMAAdotmax(x) - ESMAAdotmin(x)) / (1.0 - (2.0 * xl - 1.0) + trunc(xl)));
 }
 float dotsat(float4 x)
@@ -733,7 +733,7 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
 							   float lumaBias
                                ) {
 	// Calculate lumas:
-	float3 weights = float3(0.2126, 0.7152, 0.0722);
+	float3 weights = SMAA_LUMA_REF;
 	float L = dot(SMAASamplePoint(colorTex, texcoord).rgb, weights);
 
 	float Lleft = dot(SMAASamplePoint(colorTex, offset[0].xy).rgb, weights);
@@ -1019,16 +1019,16 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     
 	//TODO: consider using luma buffer texture for optimisation. 
 	// Both luma detection and smoothing could make use of it!
-	float lumaM = dot(middle, __TSMAA_LUMA_REF);
+	float lumaM = dot(middle, SMAA_LUMA_REF);
 	// float lumaMCopy = lumaM;
 	float chromaM = dotsat(middle);
 	bool useluma = lumaM > chromaM;
 	if (!useluma) lumaM = 0.0;
 	
-    float lumaS = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, __TSMAA_LUMA_REF);
-    float lumaE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, __TSMAA_LUMA_REF);
-    float lumaN = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, __TSMAA_LUMA_REF);
-    float lumaW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaS = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaN = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, SMAA_LUMA_REF);
     
     float rangeMax = ESMAAmax5(lumaS, lumaE, lumaN, lumaW, lumaM);
     float rangeMin = ESMAAmin5(lumaS, lumaE, lumaN, lumaW, lumaM);
@@ -1040,10 +1040,10 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     bool earlyExit = (range < __TSMAA_EDGE_THRESHOLD) && (!SMAAedge);
 	if (earlyExit) return original;
 	
-    float lumaNW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, __TSMAA_LUMA_REF);
-    float lumaSE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, __TSMAA_LUMA_REF);
-    float lumaNE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, __TSMAA_LUMA_REF);
-    float lumaSW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaNW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaSE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaNE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaSW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, SMAA_LUMA_REF);
 	
     bool horzSpan = (abs(mad(-2.0, lumaW, lumaNW + lumaSW)) + mad(2.0, abs(mad(-2.0, lumaM, lumaN + lumaS)), abs(mad(-2.0, lumaE, lumaNE + lumaSE)))) >= (abs(mad(-2.0, lumaS, lumaSW + lumaSE)) + mad(2.0, abs(mad(-2.0, lumaM, lumaW + lumaE)), abs(mad(-2.0, lumaN, lumaNW + lumaNE))));	
     float lengthSign = horzSpan ? BUFFER_RCP_HEIGHT : BUFFER_RCP_WIDTH;
@@ -1071,8 +1071,8 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float2 posN = posB - offNP;
     float2 posP = posB + offNP;
     
-    float lumaEndN = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, __TSMAA_LUMA_REF);
-    float lumaEndP = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, __TSMAA_LUMA_REF);
+    float lumaEndN = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
+    float lumaEndP = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
 	
     float gradientScaled = max(abs(gradientN), abs(gradientS)) * 0.25;
     bool lumaMLTZero = mad(0.5, -lumaNN, lumaM) < 0.0;
@@ -1097,14 +1097,14 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 		if (!doneN)
 		{
 			posN -= offNP;
-			lumaEndN = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, __TSMAA_LUMA_REF);
+			lumaEndN = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
 			lumaEndN -= lumaNN;
 			doneN = abs(lumaEndN) >= gradientScaled;
 		}
 		if (!doneP)
 		{
 			posP += offNP;
-			lumaEndP = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, __TSMAA_LUMA_REF);
+			lumaEndP = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
 			lumaEndP -= lumaNN;
 			doneP = abs(lumaEndP) >= gradientScaled;
 		}
