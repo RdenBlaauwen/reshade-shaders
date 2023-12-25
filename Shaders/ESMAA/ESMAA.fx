@@ -212,12 +212,10 @@ uniform bool ESMAAEnableSmoothing <
 	ui_label = "Enable 'smoothing' AA";
 > = true;
 
-// uniform uint ESMAASmoothingMaxIterations <
-// 	ui_category = "Smoothing";
-// 	ui_label = "Max Iterations";
-// 	ui_type = "slider";
-// 	ui_min = 20; ui_max = 30; ui_step = 1;
-// > = 20;
+uniform bool ESMAASmoothingUseOptimisedVersion <
+	ui_category = "Smoothing";
+	ui_label = "Use optimised version";
+> = false;
 
 uniform float ESMAASmoothingMinStrength <
 	ui_type = "slider";
@@ -233,6 +231,13 @@ uniform float ESMAASmoothingStrengthMod <
 	ui_label = "Strength modifier";
 	ui_min = 0.0; ui_max = 1.25; ui_step = 0.01;
 > = 1.0;
+
+uniform uint ESMAASmoothingMaxIterations <
+	ui_type = "slider";
+	ui_category = "Smoothing";
+	ui_label = "SmoothingMaxIterations";
+	ui_min = 5; ui_max = 20; ui_step = 1;
+> = 10;
 
 #ifdef SMAA_PRESET_CUSTOM
 	#define SMAA_THRESHOLD EdgeDetectionThreshold
@@ -283,6 +288,14 @@ uniform float ESMAASmoothingStrengthMod <
 #include "ReShade.fxh"
 
 // Textures
+
+// texture lumaTex < pooled = true; >
+// {
+// 	Width = BUFFER_WIDTH;
+// 	Height = BUFFER_HEIGHT;
+// 	Format = R16f;
+// };
+
 texture edgesTex < pooled = true; >
 {
 	Width = BUFFER_WIDTH;
@@ -309,7 +322,14 @@ texture searchTex < source = "SearchTex.png"; >
 	Format = R8;
 };
 
-// Samplers++
+// Samplers
+// sampler lumaSampler
+// {
+// 	Texture = lumaTex;
+// 	// SRGBTexture = false; //TODO: experiment with this!
+// 	// AddressU = Clamp; AddressV = Clamp;
+// 	// MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
+// };
 sampler colorGammaSampler
 {
 	Texture = ReShade::BackBufferTex;
@@ -492,6 +512,28 @@ float dotweight(float3 middle, float3 neighbor, bool useluma, float3 weights)
 	else return dot(abs(middle - neighbor), SMAA_LUMA_REF);
 }
 
+// float dotweightopt(float3 middle, float2 neighb_coord, bool useluma)
+// {
+// 	if (useluma) {
+// 		return SMAASampleLevelZero(lumaSampler, neighb_coord).r;
+// 		// float3 neighbor = SMAASampleLevelZero(ReShade::BackBuffer, neighb_coord).rgb;
+// 		// return dot(neighbor, SMAA_LUMA_REF);
+// 	}
+// 	float3 neighbor = SMAASampleLevelZero(ReShade::BackBuffer, neighb_coord).rgb;
+// 	return dot(abs(middle - neighbor), SMAA_LUMA_REF);
+// }
+
+// float dotweightoptoffset(float3 middle, float2 texcoord, float2 offset, bool useluma)
+// {
+// 	if (useluma) {
+// 		return SMAASampleLevelZeroOffset(lumaSampler, texcoord, offset).r;
+// 		// float3 neighbor = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, offset).rgb;
+// 		// return dot(neighbor, SMAA_LUMA_REF);
+// 	}
+// 	float3 neighbor = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, offset).rgb;
+// 	return dot(abs(middle - neighbor), SMAA_LUMA_REF);
+// }
+
 //////////////////////////////////////////////////// SATURATION CALCULATIONS //////////////////////////////////////////////////////////////
 
 float dotsat(float3 x)
@@ -502,6 +544,11 @@ float dotsat(float3 x)
 float dotsat(float4 x)
 {
 	return dotsat(x.rgb);
+}
+
+float dotsatopt(float3 rgb, float L)
+{
+	return ((ESMAAdotmax(rgb) - ESMAAdotmin(rgb)) / (1.0 - (2.0 * L - 1.0) + trunc(L)));
 }
 
 ///////////////////////////////////////////////////// SMAA HELPER FUNCTIONS ///////////////////////////////////////////////////////////////
@@ -993,13 +1040,19 @@ float3 SMAANeighborhoodBlendingWrapPS(
 }
 
 //////////////////////////////////////////////////////// SMOOTHING ////////////////////////////////////////////////////////////////////////
+// float ESMAALumaCalcPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0) : SV_Target
+// {
+// 	//TODO: see if gamma sampling gives different results
+// 	float3 col = SMAASampleLevelZero(colorGammaSampler, texcoord).rgb;
+// 	return dot(col, SMAA_LUMA_REF);
+// }
 /**
  * Algorithm called 'smoothing', found in Lordbean's TSMAA. 
  * Appears to fix inconsistencies at edges by nudging pixel values towards values of nearby pixels.
  * A little gem that combines well with SMAA, but not very performant
  * TODO: try to optimise somehow
  */
-float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+float3 TSMAASmoothingPSOld(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
  {
     float4 m = float4(
 		SMAASampleLevelZero(blendSampler, offset.xy).a, 
@@ -1135,7 +1188,161 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	return SMAASampleLevelZero(ReShade::BackBuffer, posM).rgb;
 }
 
+float3 TSMAASmoothingPSNew(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+ {
+	float2 middleEdges = SMAASampleLevelZero(edgesSampler, texcoord).rg;
+
+	float4 m = float4(
+		SMAASampleLevelZero(blendSampler, offset.xy).a, 
+		SMAASampleLevelZero(blendSampler, offset.zw).g, 
+		SMAASampleLevelZero(blendSampler, texcoord).zx
+	);
+
+	if(!ESMAAEnableSmoothing || (!any(m)) && !any(middleEdges)) discard;
+
+	float3 middle = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
+    float3 original = middle;
+	
+	float lumaM = dot(middle, SMAA_LUMA_REF);
+	float chromaM = dotsatopt(middle, lumaM);
+	bool useluma = lumaM > chromaM;
+	if (!useluma) lumaM = 0.0;
+
+	float lumaS = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaN = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, SMAA_LUMA_REF);
+    
+    float rangeMax = ESMAAmax5(lumaS, lumaE, lumaN, lumaW, lumaM);
+    float rangeMin = ESMAAmin5(lumaS, lumaE, lumaN, lumaW, lumaM);
+	
+    float range = rangeMax - rangeMin;
+    
+	// early exit check
+    bool earlyExit = (range < __TSMAA_EDGE_THRESHOLD);
+	if (earlyExit) return original;
+
+	float lumaNW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaSE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaNE = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaSW = dotweight(middle, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, SMAA_LUMA_REF);
+
+	// These vals serve as caches, so they can be used later without having to redo them
+	// It's just an optimisation thing
+	float lumaNWSW = lumaNW + lumaSW;
+	float lumaNS = lumaN + lumaS;
+	float lumaNESE = lumaNE + lumaSE;
+	float lumaSWSE = lumaSW + lumaSE;
+	float lumaWE = lumaW + lumaE;
+	float lumaNWNE = lumaNW + lumaNE;
+	
+    bool horzSpan = (abs(mad(-2.0, lumaW, lumaNWSW)) + mad(2.0, abs(mad(-2.0, lumaM, lumaNS)), abs(mad(-2.0, lumaE, lumaNESE)))) >= (abs(mad(-2.0, lumaS, lumaSWSE)) + mad(2.0, abs(mad(-2.0, lumaM, lumaWE)), abs(mad(-2.0, lumaN, lumaNWNE))));	
+    float lengthSign = horzSpan ? BUFFER_RCP_HEIGHT : BUFFER_RCP_WIDTH;
+	
+	bool smaahoriz = max(m.x, m.z) > max(m.y, m.w);
+    bool smaadata = dot(m, float4(1,1,1,1)) != 0.0;
+	float maxblending = 0.5 + (0.5 * ESMAAmax4(m.r, m.g, m.b, m.a));
+	if (((horzSpan) && ((smaahoriz) && (smaadata))) || ((!horzSpan) && ((!smaahoriz) && (smaadata)))) maxblending *= 0.5;
+    else maxblending = min(maxblending * 1.5, 1.0);
+
+	float2 lumaNP = float2(lumaN, lumaS);
+	TSMAAMovc(bool(!horzSpan).xx, lumaNP, float2(lumaW, lumaE));
+	
+    float gradientN = lumaNP.x - lumaM;
+    float gradientS = lumaNP.y - lumaM;
+    float lumaNN = lumaNP.x + lumaM;
+	
+    if (abs(gradientN) >= abs(gradientS)) lengthSign = -lengthSign;
+    else lumaNN = lumaNP.y + lumaM;
+	
+    float2 posB = texcoord;
+	
+	float texelsize = 0.5;
+
+    float2 offNP = float2(0.0, BUFFER_RCP_HEIGHT * texelsize);
+	TSMAAMovc(bool(horzSpan).xx, offNP, float2(BUFFER_RCP_WIDTH * texelsize, 0.0));
+	TSMAAMovc(bool2(!horzSpan, horzSpan), posB, float2(posB.x + lengthSign / 2.0, posB.y + lengthSign / 2.0));
+	
+    float2 posN = posB - offNP;
+    float2 posP = posB + offNP;
+
+	float lumaEndN = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
+    float lumaEndP = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
+	
+    float gradientScaled = max(abs(gradientN), abs(gradientS)) * 0.25;
+    bool lumaMLTZero = mad(0.5, -lumaNN, lumaM) < 0.0;
+	
+	lumaNN *= 0.5;
+	
+    lumaEndN -= lumaNN;
+    lumaEndP -= lumaNN;
+	
+    bool doneN = abs(lumaEndN) >= gradientScaled;
+    bool doneP = abs(lumaEndP) >= gradientScaled;
+    bool doneNP = doneN && doneP;
+	
+	if(!doneNP){
+		uint iterations = 0;
+		// scan distance
+		uint maxiterations = ESMAASmoothingMaxIterations;
+		
+		[loop] while (iterations < maxiterations)
+		{
+			doneNP = doneN && doneP;
+			if (doneNP) break;
+			if (!doneN)
+			{
+				posN -= offNP;
+				// lumaEndN = dotweightopt(middle, posN, useluma);
+				lumaEndN = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
+				lumaEndN -= lumaNN;
+				doneN = abs(lumaEndN) >= gradientScaled;
+			}
+			if (!doneP)
+			{
+				posP += offNP;
+				// lumaEndP = dotweightopt(middle, posP, useluma);
+				lumaEndP = dotweight(middle, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
+				lumaEndP -= lumaNN;
+				doneP = abs(lumaEndP) >= gradientScaled;
+			}
+			iterations++;
+		}
+	}
+	
+	float2 dstNP = float2(texcoord.y - posN.y, posP.y - texcoord.y);
+	TSMAAMovc(bool(horzSpan).xx, dstNP, float2(texcoord.x - posN.x, posP.x - texcoord.x));
+
+	//TODO: consider turning this into a preprocessor value
+	maxblending = max(maxblending, ESMAASmoothingMinStrength) * ESMAASmoothingStrengthMod;
+	
+    bool goodSpan = (dstNP.x < dstNP.y) ? ((lumaEndN < 0.0) != lumaMLTZero) : ((lumaEndP < 0.0) != lumaMLTZero);
+    float pixelOffset = mad(-rcp(dstNP.y + dstNP.x), min(dstNP.x, dstNP.y), 0.5);
+    float subpixOut = pixelOffset * maxblending;
+	
+	[branch] if (!goodSpan)
+	{
+		subpixOut = mad(mad(2.0, lumaNS + lumaWE, lumaNWSW + lumaNESE), 0.083333, -lumaM) * rcp(range); //ABC
+		subpixOut = pow(saturate(mad(-2.0, subpixOut, 3.0) * (subpixOut * subpixOut)), 2.0) * maxblending * pixelOffset; // DEFGH
+	}
+
+    float2 posM = texcoord;
+	TSMAAMovc(bool2(!horzSpan, horzSpan), posM, mad(lengthSign, subpixOut, posM));
+
+	return SMAASampleLevelZero(ReShade::BackBuffer, posM).rgb;
+}
+
+float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+{
+	if(ESMAASmoothingUseOptimisedVersion){
+		return TSMAASmoothingPSNew(vpos, texcoord, offset);
+	}
+	return TSMAASmoothingPSOld(vpos, texcoord, offset);
+}
+
+
 ////////////////////////////////////////////////////////////// SOFTENING ////////////////////////////////////////////////////////////////
+
 /**
  * A modified version of Lordbean's Softening pass, taken from his TSMAA shader.
  * It works by averaging divergent pixels with their surroundings.
@@ -1276,7 +1483,18 @@ technique ESMAA
 		VertexShader = TSMAANeighborhoodBlendingVS;
 		PixelShader = ESMAASofteningPS;
 	}
-	pass ImageSoftening
+	// pass LumaBuffering
+	// {
+	// 	VertexShader = PostProcessVS;
+	// 	PixelShader = ESMAALumaCalcPS;
+	// 	RenderTarget = lumaTex;
+	// 	// ClearRenderTargets = true;
+	// 	// StencilEnable = true;
+	// 	// StencilPass = KEEP;
+	// 	// StencilFunc = EQUAL;
+	// 	// StencilRef = 1;
+	// }
+	pass ImageSmoothing
 	{
 		VertexShader = TSMAANeighborhoodBlendingVS;
 		PixelShader = TSMAASmoothingPS;
