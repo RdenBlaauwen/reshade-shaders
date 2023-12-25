@@ -518,7 +518,7 @@ float2 getScaledThreshold(float input){
 	// Makes ESMAAThresholdFloor the minimum value
 	float scaledAndFloored = max(ESMAAThresholdFloor, scaled);
 	float scaledThreshold = SMAA_THRESHOLD * scaledAndFloored;
-	return float2(scaledThreshold).xx;
+	return float2(scaledThreshold, scaledThreshold);
 }
 
 /**
@@ -545,7 +545,7 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
 	float2 threshold;
 	if(ESMAAEnableAdaptiveThreshold){
 		// use biggest local luma as basis
-		maxLuma = max(L, max(Lleft, Ltop))
+		maxLuma = max(L, max(Lleft, Ltop));
 		// scaled maxLuma so that only dark places have a significantly lower threshold
 		threshold = getScaledThreshold(maxLuma);
 	} else {
@@ -730,12 +730,12 @@ float2 ESMAAHybridEdgeDetectionPS(
 {
 	float2 edges;
 	bool edgesFound = false;
-	if(ESMAAEnableChromaEdgeDetection){
-		edges = ESMAAChromaEdgeDetection(texcoord, offset, colorGammaSampler);
+	if(ESMAAEnableLumaEdgeDetection){
+		edges = ESMAALumaEdgeDetection(texcoord, offset, colorGammaSampler);
 		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
 	}
-	if(ESMAAEnableLumaEdgeDetection && !edgesFound){
-		edges = ESMAALumaEdgeDetection(texcoord, offset, colorGammaSampler);
+	if(ESMAAEnableChromaEdgeDetection && !edgesFound){
+		edges = ESMAAChromaEdgeDetection(texcoord, offset, colorGammaSampler);
 		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
 	}
 	if(ESMAAEnableDepthEdgeDetection && !edgesFound){
@@ -774,7 +774,7 @@ float3 SMAANeighborhoodBlendingWrapPS(
 		return SMAANeighborhoodBlendingPS(texcoord, offset, colorLinearSampler, blendSampler).rgb;
 
 	// Return the original color if nothing is turned on
-	return SMAASampleLevelZero(colorLinearSampler, texcoord);
+	return SMAASampleLevelZero(colorLinearSampler, texcoord).rgb;
 }
 
 //////////////////////////////////////////////////////// SMOOTHING ////////////////////////////////////////////////////////////////////////
