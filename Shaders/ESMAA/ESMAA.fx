@@ -614,7 +614,8 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 	float topDepth = linearizeDepth(f);
 	float leftDepth = linearizeDepth(h);
 
-	float detectionThreshold = SMAA_DEPTH_THRESHOLD * (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
+	float depthScaling = (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
+	float detectionThreshold = SMAA_DEPTH_THRESHOLD * depthScaling;
 
 	float3 neighbours = float3(currDepth, leftDepth, topDepth);
 	float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
