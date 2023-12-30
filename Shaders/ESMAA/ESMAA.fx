@@ -22,19 +22,6 @@
 
 #include "ReShadeUI.fxh"
 
-// uniform int EdgeDetectionType < __UNIFORM_COMBO_INT1
-// 	ui_items = 
-// 		"Luminance edge detection\0"
-// 		"Color edge detection\0"
-// 		"Both, biasing Clarity\0"
-// 		"Both, biasing Anti-Aliasing\0"
-// 		"Experimental adaptive luma\0"
-// 		"Hybrid detection\0"
-// 		"Hybrid detection ADD\0";
-// 	ui_label = "Edge Detection Type";
-// 	ui_tooltip = "Experimental adaptive luma only does special stuff if you enable adaptive threshold stuff";
-// > = 4;
-
 uniform int MaxSearchSteps < __UNIFORM_SLIDER_INT1
 	ui_min = 1; ui_max = 112;
 	ui_label = "Max Search Steps";
@@ -54,7 +41,7 @@ uniform int CornerRounding < __UNIFORM_SLIDER_INT1
 > = 10;
 
 uniform int DebugOutput < __UNIFORM_COMBO_INT1
-	ui_items = "None\0View edges\0View weights\0";
+	ui_items = "None\0View edges\0View weights\0Depth Edge estimation\0";
 	ui_label = "Debug Output";
 > = false;
 
@@ -69,16 +56,6 @@ uniform bool ESMAAEnableSMAABlending <
 				 "Turning this off won't affect other effects.";
 > = true;
 
-uniform bool ESMAAEdgeDetectionUseExperimental <
-	ui_category = "Edge Detection";
-	ui_label = "UseExperimental";
-> = true;
-
-uniform bool ESMAAAdvancedDepthDetection <
-	ui_category = "Edge Detection";
-	ui_label = "AdvancedDepthDetection";
-> = true;
-
 uniform bool ESMAAEnableLumaEdgeDetection <
 	ui_category = "Edge Detection";
 	ui_label = "EnableLumaEdgeDetection";
@@ -89,14 +66,9 @@ uniform bool ESMAAEnableChromaEdgeDetection <
 	ui_label = "EnableChromaEdgeDetection";
 > = true;
 
-uniform bool ESMAAUseChromaAsFallback <
+uniform bool ESMAAEnableDepthEdgeDetection <
 	ui_category = "Edge Detection";
-	ui_label = "UseChromaAsFallback";
-> = true;
-
-uniform bool ESMAAUseDepthDataAsFallback <
-	ui_category = "Edge Detection";
-	ui_label = "UseDepthDataAsFallback";
+	ui_label = "EnableDepthEdgeDetection";
 > = true;
 
 uniform bool ESMAADepthPredicationAntiNeighbourCheck <
@@ -115,28 +87,12 @@ uniform float EdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_min = 0.02; ui_max = 0.2; ui_step = 0.001;
 > = 0.075;
 
-uniform bool ESMAAEnableAdvancedDepthEdgeDetection <
-	ui_category = "Edge Detection";
-	ui_label = "EnableAdvancedDepthEdgeDetection";
-> = false;
-
-uniform bool ESMAAEnableDepthEdgeDetection <
-	ui_category = "Edge Detection";
-	ui_label = "EnableDepthEdgeDetection";
-> = false;
-
 uniform float DepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Depth Edge Detection Threshold";
 	ui_min = 0.0001; ui_max = 0.10; ui_step = 0.0001;
 	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
 > = 0.01;
-
-// uniform float DepthEdgeAvgDetectionThreshold < __UNIFORM_DRAG_FLOAT1
-// 	ui_category = "Edge Detection";
-// 	ui_label = "DepthEdgeAvgDetectionThresh";
-// 	ui_min = 0.000001; ui_max = 0.001; ui_step = 0.000001;
-// > = 0.0001;
 
 uniform float DepthEdgeAvgDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
@@ -150,20 +106,6 @@ uniform float DepthAntiSymmetryThresh <
 	ui_label = "DepthAntiSymmetryThresh";
 	ui_min = 0.000000001; ui_max = 0.001; ui_step = 0.000000001;
 > = 0.0001;
-
-uniform float AdvancedDepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
-	ui_category = "Edge Detection";
-	ui_label = "Advanced Depth Edge Threshold";
-	ui_min = 0.00001; ui_max = 0.01; ui_step = 0.00001;
-	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
-> = 0.0005;
-
-uniform float ESMAAAdvancedDepthDetectionNearBias < __UNIFORM_DRAG_FLOAT1
-	ui_category = "Edge Detection";
-	ui_type = "slider";
-	ui_label = "AdvancedDepthDetectionNearBias";
-	ui_min = 0.1; ui_max = 1.0; ui_step = 0.01;
-> = 0.80;
 
 uniform float ContrastAdaptationFactor < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
@@ -295,7 +237,6 @@ uniform float ESMAASmoothingStrengthMod <
 #ifdef SMAA_PRESET_CUSTOM
 	#define SMAA_THRESHOLD EdgeDetectionThreshold
 	#define SMAA_DEPTH_THRESHOLD DepthEdgeDetectionThreshold
-	#define SMAA_ADVANCED_DEPTH_THRESHOLD AdvancedDepthEdgeDetectionThreshold
 	#define SMAA_MAX_SEARCH_STEPS MaxSearchSteps
 	#define SMAA_CORNER_ROUNDING CornerRounding
 	#define SMAA_MAX_SEARCH_STEPS_DIAG MaxSearchStepsDiagonal
@@ -497,8 +438,50 @@ float scaleStrength(float strength){
 	return strength;
 }
 
+/**
+ * Finds the greatest component of an RGB coded color.
+ * 
+ * @param float3 rgb a color
+ * @return float the greates component found in the input color
+ */
 float maxComp(float3 rgb){
-	return max(rgb.r,max(rgb.g,rgb.b));
+	return max(rgb.r, max(rgb.g, rgb.b));
+}
+
+/**
+ * Turns a non-linear value into a linear value. Typically used to turn depth into linear depth.
+ * 
+ * Borrowed from DisplayDepth.fx, by CeeJay.dk (with many updates and additions by the Reshade community).
+ *
+ * @param float nonLinear non-linear value to be converted
+ * @param bool logarithmic whether the input value is logarithmic
+ * @param bool reverse whether the input is reversed.
+ * @return float input converted into linear
+ */
+float linearize(float nonLinear, bool logarithmic, bool reversed) {
+	const float C = 0.01;
+	float linVal = nonLinear;
+	if (logarithmic) // RESHADE_DEPTH_INPUT_IS_LOGARITHMIC
+		linVal = (exp(linVal * log(C + 1.0)) - 1.0) / C;
+
+	if (reversed) // RESHADE_DEPTH_INPUT_IS_REVERSED
+		linVal = 1.0 - linVal;
+
+	const float N = 1.0;
+	linVal /= RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - linVal * (RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - N);
+
+	return linVal;
+}
+
+/**
+ * A wrapper around linearize() that turns non-linear depth into linear depth.
+ * Uses Reshade's environment variables to decide how to convert depth.
+ *
+ * @param float nonLinear non-linear value to be converted
+ * @return float input converted into linear depth
+ */
+float linearizeDepth(float depth) {
+	return linearize(depth, RESHADE_DEPTH_INPUT_IS_LOGARITHMIC, RESHADE_DEPTH_INPUT_IS_REVERSED);
 }
 
 //////////////////////////////////////////////////////// PIXEL INFORMATION ////////////////////////////////////////////////////////////////
@@ -579,6 +562,143 @@ void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position :
 }
 
 //////////////////////////////// EDGE DETECTION FUNCTIONS (MUST BE WRAPPED) ////////////////////////////////
+
+/**
+ * This function is meant for edge predication. It detects geometric edges using depth-detection with high accuracy, but in a symmetric fashion.
+ * Which means it detects pixels around both sides of edges. This ironically makes it pretty bad for real edge detecion,
+ * but potentially great for edge predication. I like to call it "edge prediction".
+ * 
+ * It works in two phases. First it does conventional edge-based edge detection. If this finds anything, it returns early.
+ * Otherwise it continues to do the "edge prediction" as described above. 
+ * 
+ * Strange as it may sound, this is actually a highly modified version of Lordbean's image softening,
+ * adapted to use depth info instead. Worked like a charm
+ * 
+ * @param float2 texcoord coordinates of current texel, just like edge detection functions
+ * @param float4 offset[3] contains coordinates of 6 neighboring texels, equal to the ones used in edge detection functions
+ * @return float2 contains 2 numbers (RG channels) representing left and top edge, ranging from 0.0 - 1.0. 
+ * 	1.0 meaning a geometric edge is definitely there
+ *	0.0 meaning there is no geometric edge
+ *	anything in between is a "maybe".
+ *
+ * Warning: if this fucntion returns a 1.0 somewhere it should not be assumed there is definitively an edge, as there is sometimes
+ * a disconnect between geometric and visual info.
+ * Warning: do NOT use this as a true edge-detection algo. It WILL lead to false positives and artifacts!
+ */
+float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
+{
+	// pattern:
+	//  e f g
+	//  h a b
+	//  i c d
+	float e,f,h,a, original;
+
+	#if __RENDERER__ >= 0xa000 // if DX10 or above
+		// get RGB values from the c, d, b, and a positions, in order.
+		float4 hafe = tex2Dgatheroffset(ReShade::DepthBuffer, texcoord, int2(-1, -1), 0);
+		e = hafe.w;
+		f = hafe.z;
+		h = hafe.x;
+		a = hafe.y;
+		original = a;
+	#else // if DX9
+		e = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(-1, -1)).r;
+		f = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(0, -1)).r;
+		h = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(-1, 0)).r;
+		a = SMAASampleLevelZero(ReShade::DepthBuffer, texcoord).r;
+		original = a;
+	#endif
+
+
+	float currDepth = linearizeDepth(a);
+	float topDepth = linearizeDepth(f);
+	float leftDepth = linearizeDepth(h);
+
+	float detectionThreshold = SMAA_DEPTH_THRESHOLD * (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
+
+	float3 neighbours = float3(currDepth, leftDepth, topDepth);
+	float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
+	float2 edges = step(detectionThreshold, delta);
+	float edgeDot = dot(edges, float2(1.0, 1.0));
+
+	// bool surface = false;
+	// if(ESMAADepthDataSurfaceCheck && edgeDot > 0.0){
+	// 	float2 farDeltas;
+	// 	if(edges.r > 0.0){
+	// 		float hLeft = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(-2, 0)).r;
+	// 		float leftLeftDepth = linearizeDepth(hLeft);
+	// 		farDeltas.r = abs(leftDepth - leftLeftDepth);
+	// 	}
+	// 	if(edges.g > 0.0){
+	// 		float fTop = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(0, -2)).r;
+	// 		float topTopDepth = linearizeDepth(fTop);
+	// 		farDeltas.g = abs(topDepth - topTopDepth);
+	// 	}
+	// 	float2 farEdges = step(detectionThreshold,farDeltas);
+	// 	surface = dot(farEdges, float2(1.0,1.0)) > 0.0;
+	// }
+
+	// Early return if there is an edge:
+    // if (!surface && edgeDot > 0.0)
+    //     return edges;
+
+	if (edgeDot > 0.0)
+        return edges;
+
+	float factor = a + saturate(0.001 - a) * 2.0;
+	float predictionThreshold = ESMAA_DEPTH_PREDICATION_THRESHOLD * factor;
+
+	float b,c,d;
+	#if __RENDERER__ >= 0xa000 // if DX10 or above
+		// get RGB values from the c, d, b, and a positions, in order.
+		float4 cdba = tex2Dgather(ReShade::DepthBuffer, texcoord, 0);
+		b = cdba.z;
+		c = cdba.x;
+		d = cdba.y;
+	#else // if DX9
+		b = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(1, 0)).r;
+		c = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(0, 1)).r;
+		d = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(1, 1)).r;
+	#endif
+
+	if(ESMAADepthPredicationAntiNeighbourCheck){
+		float3 antiNeighbs = float3(a, b, c);
+		float2 antiDelta = abs(antiNeighbs.xx - float2(antiNeighbs.y, antiNeighbs.z));
+		edges = step(detectionThreshold, antiDelta);
+
+		// Early return if there is an edge:
+		if (dot(edges, float2(1.0, 1.0)) > 0.0)
+			return float2(0.0,0.0);
+	}
+
+	// float x1 = (e + f + g) / 3.0;
+	// float x2 = (h + b) / 2.0;
+	// float x3 = (i + c + d) / 3.0;
+	float x1 = f;
+	float x2 = (h + b) / 2.0;
+	float x3 = c;
+
+	// float xy1 = (e + d) / 2.0;
+	// float xy2 = (i + g) / 2.0;
+
+	float localAvg = (x1 + x2 + x3) / 3.0;
+	float edgeAvg = (h+f)/2.0;
+
+	float diff = abs(a - localAvg);
+
+    if (diff > predictionThreshold) {
+		if(ESMAADepthPredicationSymmetric){
+			float2 res = step(diff * 4.0, delta);
+			if(dot(res,float2(1.0,1.0)) == 1.0){
+				return res;
+			}
+		}
+		// This is like saying "Maybe there's an edge here, maybe there isn't. Please keep an eye out for jaggies just in case."
+		return float2(0.5,0.5); 
+	}
+	return float2(0.0,0.0);
+}
+
 
 /**
  * Used in edge detection methods to adapt threshold to magnitude of local pixels
@@ -801,288 +921,12 @@ float2 ESMAADepthEdgeDetection(float2 texcoord, float4 offset[3])
 	float2 depthDelta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
 	return step(SMAA_DEPTH_THRESHOLD, depthDelta);
 }
-
-float2 ESMAAAdvancedDepthEdgeDetection(float2 texcoord, float4 offset[3]) 
-{
-	// float2 pixeloffset = BUFFER_PIXEL_SIZE / 2.0;
-	// float2 pixeloffset = float2(0.0,0.0);
-	// float2 pixeloffset = SMAA_RT_METRICS.xy / 4.0;
-	// float midD = ReShade::GetLinearizedDepth(texcoord - pixeloffset);
-	// float leftD = ReShade::GetLinearizedDepth(offset[0].xy - pixeloffset);
-	// float topD  = ReShade::GetLinearizedDepth(offset[0].zw - pixeloffset);
-	float4 delta;
-	float midD = ReShade::GetLinearizedDepth(texcoord);
-	float leftD = ReShade::GetLinearizedDepth(offset[0].xy);
-	float topD  = ReShade::GetLinearizedDepth(offset[0].zw);
-
-	float maxDepth = max(midD,max(leftD,topD));
-
-	float scaledThreshold = SMAA_DEPTH_THRESHOLD * sin(maxDepth);
-
-	float2 signedDelta = float2(leftD, topD) - midD;
-	delta.xy = abs(signedDelta);
-
-	float2 edges = step(scaledThreshold, delta.xy);
-	// return edges;
-	// if (signedDelta.x == 0.0 && signedDelta.y == 0.0 || dot(edges,float2(1.0,1.0)) > 0.0){
-	// if (dot(edges,float2(1.0,1.0)) > 0.0){
-	// 	return edges;
-	// }
-	
-	// float threshFloor = SMAA_ADVANCED_DEPTH_THRESHOLD/10.0;
-
-	if(edges.x == 0.0){
-		float rightD = ReShade::GetLinearizedDepth(offset[1].xy);
-		// float rightD = ReShade::GetLinearizedDepth(offset[1].xy + float2(pixeloffset.x,-pixeloffset.y));
-
-		bool leftRightValid = false;
-		if(leftD > midD && rightD > midD){
-			leftRightValid = true;
-		} else if(leftD < midD && rightD < midD){
-			leftRightValid = true;
-		}
-		// } else {
-		// 	float maxHorD = max(leftD,max(rightD,midD));
-		// 	float dL = abs(signedDelta.x);
-		// 	float dR = abs(rightD - midD);
-		// 	float ddLR = abs(dL - dR);
-		// 	float scaledHorThresh = saturate(SMAA_ADVANCED_DEPTH_THRESHOLD * (maxHorD*8)*(maxHorD*8));
-		// 	if(ddLR >= scaledHorThresh){
-		// 		leftRightValid = true;
-		// 	}
-		// }
-		edges.x = leftRightValid ? 1.0 : 0.0;
-
-		delta.z = abs(midD - rightD);
-	}
-
-	if(edges.y == 0.0){
-		float bottomD = ReShade::GetLinearizedDepth(offset[1].zw);
-		// float bottomD = ReShade::GetLinearizedDepth(offset[1].zw + float2(-pixeloffset.x,pixeloffset.y));
-
-		bool topBottomValid = false;
-		if(topD > midD && bottomD > midD){
-			topBottomValid = true;
-		} else if(topD < midD && bottomD < midD){
-			topBottomValid = true;
-		}
-		// } else {
-		// 	float maxVerD = max(topD,max(bottomD,midD));
-		// 	float dT = abs(signedDelta.y);
-		// 	float dB = abs(bottomD - midD);
-		// 	float ddTB = abs(dT - dB);
-		// 	float scaledVertThresh = saturate(SMAA_ADVANCED_DEPTH_THRESHOLD * (maxVerD*8)*(maxVerD*8));
-		// 	if(ddTB >= scaledVertThresh){
-		// 		topBottomValid = true;
-		// 	}
-		// }
-
-		edges.y = topBottomValid ? 1.0 : 0.0;
-		delta.w = abs(midD - bottomD);
-	}
-	float2 maxDelta = max(delta.xy, delta.zw);
-	float finalDelta = max(maxDelta.x,maxDelta.y);
-
-    edges.xy *= step(maxDelta, SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR * delta.xy);
-
-	return edges;
-
-	// float2 res = float2(0.0,0.0);
-	// TSMAAMovc(bool2(leftRightValid,topBottomValid), res, step(0.0,signedDelta));
-
-	// float2 depthDelta = abs(signedDelta);
-	// return step(SMAA_DEPTH_THRESHOLD, depthDelta);
-	// return step(0.0001,abs(signedDelta));
-	// return abs(signedDelta);
-	// return res;
-}
-
-
-// float avg(float4 x){
-// 	return dot(x,float2(0.25,0.25).xxxx);
-// }
-// float avg(float x,float y,float z,float w){
-// 	return avg(float4(x,y,z,w));
-// }
-
-// float validateCond(bool cond, inout float variable)
-// {
-//     if (!cond) { 
-// 		variable.x = 0.0;
-// 		return 0.0;
-// 	} else {
-// 		return 0.0;
-// 	}
-// }
-
-// float validateCond(bool cond, inout float variable, inout uint counter)
-// {
-// 	float res = validateCond(cond, variable);
-// 	counter += res > 0.0 ? 1 : 0;
-// 	return res;
-// }
-
-float validateCond(bool cond, inout float variable, inout uint counter)
-{
-    if (!cond) { 
-		variable.x = 0.0;
-		return 0.0;
-	} else {
-		counter++;
-		return 0.0;
-	}
-}
-
-float minZeroLoses(float a, float b){
-	if(a == 0.0){
-		return b;
-	} else if(b == 0.0){
-		return a;
-	}
-	return min(a,b);
-}
-
-/**
- * from DisplayDepth.fx
- */
-float linearize(float nonLinear, bool logarithmic, bool reversed) {
-	const float C = 0.01;
-	float linVal = nonLinear;
-	if (logarithmic) // RESHADE_DEPTH_INPUT_IS_LOGARITHMIC
-		// linVal = (exp(nonLinear * log(C + 1.0)) - 1.0) / C;
-		// Borrowed from mmx_depth.fxh TODO: 
-		linVal = (linVal) * lerp((linVal), 1.0, 0.04975); //extremely precise approximation that does not rely on transcendentals
-
-	if (reversed) // RESHADE_DEPTH_INPUT_IS_REVERSED
-		linVal = 1.0 - linVal;
-
-	const float N = 1.0;
-	linVal /= RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - linVal * (RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - N);
-
-	return linVal;
-}
-
-float linearizeDepth(float depth) {
-	return linearize(depth, RESHADE_DEPTH_INPUT_IS_LOGARITHMIC, RESHADE_DEPTH_INPUT_IS_REVERSED);
-	// return linearize(depth, true, true);
-}
-
-float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
-{
-	// pattern:
-	//  e f g
-	//  h a b
-	//  i c d
-	float e,f,h,a, original;
-
-	#if __RENDERER__ >= 0xa000 // if DX10 or above
-		// get RGB values from the c, d, b, and a positions, in order.
-		float4 hafe = tex2Dgatheroffset(ReShade::DepthBuffer, texcoord, int2(-1, -1), 0);
-		e = hafe.w;
-		f = hafe.z;
-		h = hafe.x;
-		a = hafe.y;
-		original = a;
-	#else // if DX9
-		e = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(-1, -1)).r;
-		f = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(0, -1)).r;
-		h = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(-1, 0)).r;
-		a = SMAASampleLevelZero(ReShade::DepthBuffer, texcoord).r;
-		original = a;
-	#endif
-
-
-	float currDepth = linearizeDepth(a);
-	float topDepth = linearizeDepth(f);
-	float leftDepth = linearizeDepth(h);
-
-	float detectionThreshold = SMAA_DEPTH_THRESHOLD * (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
-
-	float3 neighbours = float3(currDepth, leftDepth, topDepth);
-	float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
-	float2 edges = step(detectionThreshold, delta);
-	float edgeDot = dot(edges, float2(1.0, 1.0));
-
-	bool surface = false;
-	// if(ESMAADepthDataSurfaceCheck && edgeDot > 0.0){
-	// 	float2 farDeltas;
-	// 	if(edges.r > 0.0){
-	// 		float hLeft = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(-2, 0)).r;
-	// 		float leftLeftDepth = linearizeDepth(hLeft);
-	// 		farDeltas.r = abs(leftDepth - leftLeftDepth);
-	// 	}
-	// 	if(edges.g > 0.0){
-	// 		float fTop = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(0, -2)).r;
-	// 		float topTopDepth = linearizeDepth(fTop);
-	// 		farDeltas.g = abs(topDepth - topTopDepth);
-	// 	}
-	// 	float2 farEdges = step(detectionThreshold,farDeltas);
-	// 	surface = dot(farEdges, float2(1.0,1.0)) > 0.0;
-	// }
-
-	// Early return if there is an edge:
-    if (!surface && edgeDot > 0.0)
-        return edges;
-
-	float factor = a + saturate(0.001 - a) * 2.0;
-	float predictionThreshold = ESMAA_DEPTH_PREDICATION_THRESHOLD * factor;
-
-	float b,c,d;
-	#if __RENDERER__ >= 0xa000 // if DX10 or above
-		// get RGB values from the c, d, b, and a positions, in order.
-		float4 cdba = tex2Dgather(ReShade::DepthBuffer, texcoord, 0);
-		b = cdba.z;
-		c = cdba.x;
-		d = cdba.y;
-	#else // if DX9
-		b = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(1, 0)).r;
-		c = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(0, 1)).r;
-		d = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(1, 1)).r;
-	#endif
-
-	if(ESMAADepthPredicationAntiNeighbourCheck){
-		float3 antiNeighbs = float3(a, b, c);
-		float2 antiDelta = abs(antiNeighbs.xx - float2(antiNeighbs.y, antiNeighbs.z));
-		edges = step(detectionThreshold, antiDelta);
-
-		// Early return if there is an edge:
-		if (dot(edges, float2(1.0, 1.0)) > 0.0)
-			return float2(0.0,0.0);
-	}
-
-	// float x1 = (e + f + g) / 3.0;
-	// float x2 = (h + b) / 2.0;
-	// float x3 = (i + c + d) / 3.0;
-	float x1 = f;
-	float x2 = (h + b) / 2.0;
-	float x3 = c;
-
-	// float xy1 = (e + d) / 2.0;
-	// float xy2 = (i + g) / 2.0;
-
-	float localAvg = (x1 + x2 + x3) / 3.0;
-	float edgeAvg = (h+f)/2.0;
-
-	float diff = abs(a - localAvg);
-
-    if (diff > predictionThreshold) {
-		if(ESMAADepthPredicationSymmetric){
-			float2 res = step(diff * 4.0, delta);
-			if(dot(res,float2(1.0,1.0)) == 1.0){
-				return res;
-			}
-		}
-		// This is like saying "Maybe there's an edge here, maybe there isn't. Please keep an eye out for jaggies just in case."
-		return float2(0.5,0.5); 
-	}
-	return float2(0.0,0.0);
-}
-
 //////////////////////////////// PIXEL SHADERS (WRAPPERS) ////////////////////////////////
+
 /**
  * Custom edge detection pass that uses one or more edge detection methods in succession
  */
-float2 ESMAAHybridEdgeDetectionPSOld(
+float2 ESMAAHybridEdgeDetectionPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
 	float4 offset[3] : TEXCOORD1) : SV_Target
@@ -1101,54 +945,8 @@ float2 ESMAAHybridEdgeDetectionPSOld(
 		edges = ESMAADepthEdgeDetection(texcoord, offset);
 		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
 	}
-	if(ESMAAEnableAdvancedDepthEdgeDetection && !edgesFound){
-		edges = ESMAAAdvancedDepthEdgeDetection(texcoord, offset);
-	}
 	// if(!edgesFound) discard;
 	return edges;
-}
-
-float2 ESMAAHybridEdgeDetectionPSNew(
-	float4 position : SV_Position,
-	float2 texcoord : TEXCOORD0,
-	float4 offset[3] : TEXCOORD1) : SV_Target
-{
-	// float2 depthEdges = ESMAAAdvancedDepthEdgeDetection(texcoord, offset);
-	// float2 deltas = abs(signedDeltas);
-	float2 edges = float2(0.0,0.0);
-	// bool geometricShapeDetected = dot(deltas,float2(1.0,1.0)) > 0.0;
-	// float2 depthEdges = ESMAAAdvancedDepthDetection ? ESMAAAdvancedDepthEdgeDetection(texcoord, offset) : ESMAADepthEdgeDetection(texcoord, offset);
-	float2 depthEdges = DepthEdgeEstimation(texcoord, offset);
-	bool geometricShapeDetected = dot(depthEdges,float2(1.0,1.0)) > 0.0;
-	if(geometricShapeDetected){
-		if(ESMAAEnableLumaEdgeDetection){
-			edges = ESMAALumaEdgeDetection(texcoord, offset, colorGammaSampler, 0.5);
-		}
-		if(ESMAAUseChromaAsFallback && dot(edges,float2(1.0,1.0)) == 0.0){
-			edges = saturate(edges + ESMAAChromaEdgeDetection(texcoord, offset, colorGammaSampler));
-		}
-		if(ESMAAUseDepthDataAsFallback && dot(edges,float2(1.0,1.0)) == 0.0){
-			// TSMAAMovc(float2(deltas.x > 0.0,deltas.y > 0.0), edges, float2(1.0,1.0));
-			edges = depthEdges;
-		}
-		// return float2(0.0,0.0);
-		return edges;
-	}
-	if(ESMAAEnableChromaEdgeDetection){
-		edges = ESMAAChromaEdgeDetection(texcoord, offset, colorGammaSampler);
-	}
-	return edges;
-}
-
-float2 ESMAAHybridEdgeDetectionPS(
-	float4 position : SV_Position,
-	float2 texcoord : TEXCOORD0,
-	float4 offset[3] : TEXCOORD1) : SV_Target
-{
-	if(ESMAAEdgeDetectionUseExperimental){
-		return ESMAAHybridEdgeDetectionPSNew(position,texcoord,offset);
-	}
-	return ESMAAHybridEdgeDetectionPSOld(position,texcoord,offset);
 }
 
 // float4 TestBlendingWeightPS(float2 texcoord : TEXCOORD0) : SV_TARGET
@@ -1178,6 +976,14 @@ float3 SMAANeighborhoodBlendingWrapPS(
 		return tex2D(edgesSampler, texcoord).rgb;
 	if (DebugOutput == 2)
 		return tex2D(blendSampler, texcoord).rgb;
+	if (DebugOutput == 3) {
+		float4 edgeOffset[3];
+		edgeOffset[0] = float4(-offset.x,offset.y,offset.z,-offset.w);
+		edgeOffset[1] = float4(offset.x,offset.y,offset.z,offset.w);
+		edgeOffset[2] = float4(-offset.x*2.0,offset.y,offset.z,-offset.w*2.0);
+		float2 depthEdges = DepthEdgeEstimation(texcoord, edgeOffset);
+		return float3(depthEdges, 0.0);
+	}
 	if(ESMAAEnableSMAABlending)
 		return SMAANeighborhoodBlendingPS(texcoord, offset, colorLinearSampler, blendSampler).rgb;
 
