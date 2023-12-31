@@ -12,6 +12,8 @@
  *                               for ReShade 3.0+
  */
 
+#include "shared/lib.fxh"
+
 //------------------- Preprocessor Settings -------------------
 
 #if !defined(SMAA_PRESET_LOW) && !defined(SMAA_PRESET_MEDIUM) && !defined(SMAA_PRESET_HIGH) && !defined(SMAA_PRESET_ULTRA)
@@ -261,6 +263,7 @@ uniform uint ESMAASmoothingMaxIterations <
 #define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
 #define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
 #define SMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722) // weights for luma calculations
+// #define SMAA_LUMA_REF LUMA_WEIGHTS // weights for luma calculations
 #define __TSMAA_EDGE_THRESHOLD (EdgeDetectionThreshold)
 
 #define ESMAAmax4(w,x,y,z) max(max(w,x),max(y,z))
@@ -271,9 +274,19 @@ uniform uint ESMAASmoothingMaxIterations <
 #define ESMAAmin5(v,w,x,y,z) min(min(min(v,w),x),min(y,z))
 #define ESMAAmin9(r,s,t,u,v,w,x,y,z) min(min(min(min(r,s),t),min(u,v)),min(min(w,x),min(y,z)))
 
+// #define ESMAAmax4(w,x,y,z) max4(w,x,y,z)
+// #define ESMAAmax5(v,w,x,y,z) max5(v,w,x,y,z)
+// #define ESMAAmax9(r,s,t,u,v,w,x,y,z) max9(r,s,t,u,v,w,x,y,z)
+
+// #define ESMAAmin4(w,x,y,z) min4(w,x,y,z)
+// #define ESMAAmin5(v,w,x,y,z) min5(v,w,x,y,z)
+// #define ESMAAmin9(r,s,t,u,v,w,x,y,z) min9(r,s,t,u,v,w,x,y,z)
 
 #define ESMAAdotmax(x) max(max((x).r, (x).g), (x).b)
 #define ESMAAdotmin(x) min(min((x).r, (x).g), (x).b)
+
+// #define ESMAAdotmax(x) maxComp(x)
+// #define ESMAAdotmin(x) minComp(x)
 
 #if (__RENDERER__ == 0xb000 || __RENDERER__ == 0xb100)
 	#define SMAAGather(tex, coord) tex2Dgather(tex, coord, 0)
@@ -367,7 +380,6 @@ sampler searchSampler
 	MipFilter = Point; MinFilter = Point; MagFilter = Point;
 	SRGBTexture = false;
 };
-
 
 float sum(float3 vc){
 	return vc.x + vc.y + vc.z;
@@ -739,9 +751,8 @@ float2 getScaledThreshold(float input){
  */
 float2 ESMAALumaEdgeDetection(float2 texcoord,
                                float4 offset[3],
-                               SMAATexture2D(colorTex),
-							   float lumaBias
-                               ) {
+                               SMAATexture2D(colorTex)
+															) {
 	// Calculate lumas:
 	float3 weights = SMAA_LUMA_REF;
 	float L = dot(SMAASamplePoint(colorTex, texcoord).rgb, weights);
@@ -761,8 +772,6 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
 		threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
 	}
 	// ADAPTIVE THRESHOLD END
-
-	threshold *= lumaBias;
 
     // We do the usual threshold:
     float4 delta;
@@ -792,7 +801,7 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
 		// get the greates from  ALL lumas this time
 		float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
 		// scaled maxLuma so that only dark places have a significantly lower threshold
-		threshold = getScaledThreshold(finalMaxLuma) * lumaBias;
+		threshold = getScaledThreshold(finalMaxLuma);
 		// edges set to 1 if delta greater than threshold, else set to 0
 		edges = step(threshold, delta.xy);
 	}
@@ -945,7 +954,7 @@ float2 ESMAAHybridEdgeDetectionPS(
 	float2 edges;
 	bool edgesFound = false;
 	if(ESMAAEnableLumaEdgeDetection){
-		edges = ESMAALumaEdgeDetection(texcoord, offset, colorGammaSampler, 0.5);
+		edges = ESMAALumaEdgeDetection(texcoord, offset, colorGammaSampler);
 		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
 	}
 	if(ESMAAEnableChromaEdgeDetection && !edgesFound){
