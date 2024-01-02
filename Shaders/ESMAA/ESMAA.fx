@@ -12,7 +12,8 @@
  *                               for ReShade 3.0+
  */
 
-#include "shared/lib.fxh"
+#include "../shared/lib.fxh"
+#include "ESMAACore.fxh"
 
 //------------------- Preprocessor Settings -------------------
 
@@ -705,13 +706,17 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 	// float xy2 = (i + g) / 2.0;
 
 	float localAvg = (x1 + x2 + x3) / 3.0;
-	float edgeAvg = (h+f)/2.0;
+	// float edgeAvg = (h+f)/2.0;
 
-	float diff = abs(a - localAvg);
+	float localDelta = abs(a - localAvg);
 
-    if (diff > predictionThreshold) {
+    if (localDelta > predictionThreshold) {
 		if(ESMAADepthPredicationSymmetric){
-			float2 res = step(diff * 4.0, delta);
+			// If delta between top, left and current is much greater than 
+			// delta of localaverage, return 1.0 for each detected edge
+			//TODO: use log delta instead of linear delta
+			// cause this is an apples and pears comparison
+			float2 res = step(localDelta * 4.0, delta);
 			if(dot(res,float2(1.0,1.0)) == 1.0){
 				return res;
 			}
@@ -1219,30 +1224,30 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 
 	bool earlyReturn = !ESMAAEnableSoftening || noDelta || background;
 	
-// pattern:
-//  e f g
-//  h a b
-//  i c d
+	// pattern:
+	//  e f g
+	//  h a b
+	//  i c d
 
-#if __RENDERER__ >= 0xa000 // if DX10 or above
-	// get RGB values from the c, d, b, and a positions, in order.
-	float4 cdbared = tex2Dgather(ReShade::BackBuffer, texcoord, 0);
-	float4 cdbagreen = tex2Dgather(ReShade::BackBuffer, texcoord, 1);
-	float4 cdbablue = tex2Dgather(ReShade::BackBuffer, texcoord, 2);
-	a = float3(cdbared.w, cdbagreen.w, cdbablue.w);
-	float3 original = a;
-	if (earlyReturn) return original;
-	b = float3(cdbared.z, cdbagreen.z, cdbablue.z);
-	c = float3(cdbared.x, cdbagreen.x, cdbablue.x);
-	d = float3(cdbared.y, cdbagreen.y, cdbablue.y);
-#else // if DX9
-	a = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
-	float3 original = a;
-	if (earlyReturn) return original;
-	b = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, 0)).rgb;
-	c = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(0, 1)).rgb;
-	d = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, 1)).rgb;
-#endif
+	#if __RENDERER__ >= 0xa000 // if DX10 or above
+		// get RGB values from the c, d, b, and a positions, in order.
+		float4 cdbared = tex2Dgather(ReShade::BackBuffer, texcoord, 0);
+		float4 cdbagreen = tex2Dgather(ReShade::BackBuffer, texcoord, 1);
+		float4 cdbablue = tex2Dgather(ReShade::BackBuffer, texcoord, 2);
+		a = float3(cdbared.w, cdbagreen.w, cdbablue.w);
+		float3 original = a;
+		if (earlyReturn) return original;
+		b = float3(cdbared.z, cdbagreen.z, cdbablue.z);
+		c = float3(cdbared.x, cdbagreen.x, cdbablue.x);
+		d = float3(cdbared.y, cdbagreen.y, cdbablue.y);
+	#else // if DX9
+		a = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
+		float3 original = a;
+		if (earlyReturn) return original;
+		b = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, 0)).rgb;
+		c = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(0, 1)).rgb;
+		d = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, 1)).rgb;
+	#endif
 	float3 e = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, -1)).rgb;
 	float3 f = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(0, -1)).rgb;
 	float3 g = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, -1)).rgb;

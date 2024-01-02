@@ -333,4 +333,12 @@ namespace Lib
     const float piHalf = 1.5707;
     return val = sin(val * piHalf);
   }
+
+  /**
+   * @param input some factor with a value of threshold floor 0.0 - 1.0
+   */
+  float clampedScale(float input, float modifier, float floor, float ceil)
+  {
+    return clamp(input * modifier, floor, ceil);
+  }
 }
