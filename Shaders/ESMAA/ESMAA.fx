@@ -515,10 +515,10 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 	float3 neighbours = float3(currDepth, leftDepth, topDepth);
 	float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
 	float2 edges = step(detectionThreshold, delta);
-	float edgeSum = Lib::sum(edges);
+	bool anyEdges = Lib::any(edges);
 
 	// bool surface = false;
-	// if(ESMAADepthDataSurfaceCheck && edgeSum > 0.0){
+	// if(ESMAADepthDataSurfaceCheck && anyEdges){
 	// 	float2 farDeltas;
 	// 	if(edges.r > 0.0){
 	// 		float hLeft = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(-2, 0)).r;
@@ -535,10 +535,10 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 	// }
 
 	// Early return if there is an edge:
-    // if (!surface && edgeSum > 0.0)
+    // if (!surface && anyEdges)
     //     return edges;
 
-	if (edgeSum > 0.0)
+	if (anyEdges)
         return edges;
 
 	float factor = a + saturate(0.001 - a) * 2.0;
@@ -563,7 +563,7 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 		edges = step(detectionThreshold, antiDelta);
 
 		// Early return if there is an edge:
-		if (Lib::sum(edges) > 0.0)
+		if (Lib::any(edges))
 			return float2(0.0,0.0);
 	}
 
@@ -954,7 +954,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float lengthSign = horzSpan ? BUFFER_RCP_HEIGHT : BUFFER_RCP_WIDTH;
 	
 	bool smaahoriz = max(midWeights.x, midWeights.z) > max(midWeights.y, midWeights.w);
-    bool smaadata = Lib::sum(midWeights) != 0.0;
+    bool smaadata = Lib::any(midWeights);
 	float maxblending = 0.5 + (0.5 * Lib::max(midWeights.r, midWeights.g, midWeights.b, midWeights.a));
 	if (((horzSpan) && ((smaahoriz) && (smaadata))) || ((!horzSpan) && ((!smaahoriz) && (smaadata)))) maxblending *= 0.5;
     else maxblending = min(maxblending * 1.5, 1.0);
