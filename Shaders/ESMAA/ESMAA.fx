@@ -153,18 +153,6 @@ uniform bool ESMAADisableBackgroundSoftening <
 				 "Only works if ReShade has access to this game's depth buffer.";
 > = true;
 
-
-// uniform float ESMAABackgroundDepth <
-// 	ui_type = "slider";
-// 	ui_min = 0.8; ui_max = 0.999; ui_step = 0.001;
-// 	ui_label = "Background threshold";
-// 	ui_spacing = 2;
-// 	ui_tooltip = "The maximum depth where softening is performed. Pixels at greater depth than this \n"
-// 				 "are considered part of the background texture and will be skipped. The default should\n"
-// 				 " work fine for most games, but you can adjust it if necessary.";
-// 	ui_category = "Image Softening";
-// > = 0.999;
-
 uniform int ESMAAAnomalousPixelBlendingStrengthMethod < __UNIFORM_COMBO_INT1
 	ui_category = "Image Softening";
 	ui_items = "Strongly favor precision\0Favor precision\0Balanced\0Favor softening\0Strongly favor softening\0";
@@ -263,8 +251,8 @@ uniform uint ESMAASmoothingMaxIterations <
 // depths greater than this are considered part of the background/skybox
 #define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
 #define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
-#define SMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722) // weights for luma calculations
-// #define SMAA_LUMA_REF LUMA_WEIGHTS // weights for luma calculations
+// weights for luma calculations
+#define SMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722)
 #define __TSMAA_EDGE_THRESHOLD (EdgeDetectionThreshold)
 
 #if (__RENDERER__ == 0xb000 || __RENDERER__ == 0xb100)
@@ -275,13 +263,6 @@ uniform uint ESMAASmoothingMaxIterations <
 #include "ReShade.fxh"
 
 // Textures
-
-// texture lumaTex < pooled = true; >
-// {
-// 	Width = BUFFER_WIDTH;
-// 	Height = BUFFER_HEIGHT;
-// 	Format = R16f; // TODO: test R32f sometime
-// };
 
 texture edgesTex < pooled = true; >
 {
@@ -310,13 +291,6 @@ texture searchTex < source = "SearchTex.png"; >
 };
 
 // Samplers
-// sampler lumaSampler
-// {
-// 	Texture = lumaTex;
-// 	// SRGBTexture = false; //TODO: experiment with this!
-// 	// AddressU = Clamp; AddressV = Clamp;
-// 	// MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
-// };
 sampler colorGammaSampler
 {
 	Texture = ReShade::BackBufferTex;
@@ -639,7 +613,7 @@ float2 ESMAALumaEdgeDetection(
 	float Lleft = dot(SMAASamplePoint(colorTex, offset[0].xy).rgb, weights);
 	float Ltop  = dot(SMAASamplePoint(colorTex, offset[0].zw).rgb, weights);
 
-	// ADAPTIVE THRESHOLD START
+	// ADAPTIVE THRESHOLD
 	float maxLuma;
 	float2 threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
 	if(ESMAAEnableAdaptiveThreshold){
@@ -648,7 +622,6 @@ float2 ESMAALumaEdgeDetection(
 		// scaled maxLuma so that only dark places have a significantly lower threshold
 		threshold *= getThresholdScale(maxLuma);
 	} 
-	// ADAPTIVE THRESHOLD END
 
     // We do the usual threshold:
     float4 delta;
@@ -673,17 +646,14 @@ float2 ESMAALumaEdgeDetection(
     delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
 
 	// ADAPTIVE THRESHOLD second threshold check
-
 	if(ESMAAEnableAdaptiveThreshold){
-		// get the greates from  ALL lumas this time
+		// get the greatest of  ALL lumas this time
 		float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
 		// scaled maxLuma so that only dark places have a significantly lower threshold
 		threshold *= getThresholdScale(finalMaxLuma);
 		// edges set to 1 if delta greater than threshold, else set to 0
 		edges = step(threshold, delta.xy);
 	}
-
-	// ADAPTIVE THRESHOLD second threshold check END
 
     // Calculate the final maximum delta:
     maxDelta = max(maxDelta.xy, delta.zw);
@@ -703,10 +673,12 @@ float2 ESMAALumaEdgeDetection(
  * IMPORTANT NOTICE: color edge detection requires gamma-corrected colors, and
  * thus 'colorTex' should be a non-sRGB texture.
  */
-float2 ESMAAChromaEdgeDetection(float2 texcoord,
-                                float4 offset[3],
-                                SMAATexture2D(colorTex)
-                                ) {
+float2 ESMAAChromaEdgeDetection(
+	float2 texcoord,
+  float4 offset[3],
+  SMAATexture2D(colorTex)
+) 
+{
     // Calculate color deltas:
     float4 delta;
     float3 C = SMAASamplePoint(colorTex, texcoord).rgb;
@@ -719,8 +691,7 @@ float2 ESMAAChromaEdgeDetection(float2 texcoord,
     t = abs(C - Ctop);
     delta.y = Lib::max(t);
 
-	// ADAPTIVE THRESHOLD START
-
+	// ADAPTIVE THRESHOLD
 	float maxChroma;
 	float2 threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
 	if(ESMAAEnableAdaptiveThreshold){
@@ -732,8 +703,6 @@ float2 ESMAAChromaEdgeDetection(float2 texcoord,
 		// scale maxChroma so that only dark places have a significantly lower threshold
 		threshold *= getThresholdScale(maxChroma);
 	}
-
-	// ADAPTIVE THRESHOLD END
 
     // We do the usual threshold:
     float2 edges = step(threshold, delta.xy);
@@ -768,7 +737,6 @@ float2 ESMAAChromaEdgeDetection(float2 texcoord,
     float finalDelta = max(maxDelta.x, maxDelta.y);
 
 	// ADAPTIVE THRESHOLD second threshold check
-
 	if(ESMAAEnableAdaptiveThreshold){
 		// take ALL greatest components into account this time
 		float finalMaxChroma = Lib::max(
@@ -785,8 +753,6 @@ float2 ESMAAChromaEdgeDetection(float2 texcoord,
 		edges = step(threshold, delta.xy);
 	}
 	
-	// ADAPTIVE THRESHOLD second threshold check END
-
     // Local contrast adaptation:
     edges.xy *= step(finalDelta, SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR * delta.xy);
 
@@ -807,13 +773,10 @@ float2 ESMAADepthEdgeDetection(float2 texcoord, float4 offset[3])
 	float Ptop  = ReShade::GetLinearizedDepth(offset[0].zw);
 	float3 neighbours = float3(P, Pleft, Ptop);
 
-	// float maxDepth = max(P,max(Pleft,Ptop));
-
-	// float scaledThreshold = SMAA_DEPTH_THRESHOLD * max(0.1,saturate(maxDepth*2.0));
-
 	float2 depthDelta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
 	return step(SMAA_DEPTH_THRESHOLD, depthDelta);
 }
+
 //////////////////////////////// PIXEL SHADERS (WRAPPERS) ////////////////////////////////
 
 /**
@@ -842,18 +805,12 @@ float2 ESMAAHybridEdgeDetectionPS(
 	return edges;
 }
 
-// float4 TestBlendingWeightPS(float2 texcoord : TEXCOORD0) : SV_TARGET
-// {
-// 	return float4(0.25,0.5,0.75,1.0);
-// }
-
 float4 SMAABlendingWeightCalculationWrapPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
 	float2 pixcoord : TEXCOORD1,
 	float4 offset[3] : TEXCOORD2) : SV_Target
 {
-	// return TestBlendingWeightPS(texcoord);
 	if(!EnableSMAABlendingWeightCalc){
 		discard;
 	}
@@ -870,10 +827,13 @@ float3 SMAANeighborhoodBlendingWrapPS(
 	if (DebugOutput == 2)
 		return tex2D(blendSampler, texcoord).rgb;
 	if (DebugOutput == 3) {
+		// construct a custom set of offsets suitable for DepthEdgeEstimation(),
+		// because it usually needs the offsets generated by SMAAEdgeDetectionWrapVS
 		float4 edgeOffset[3];
 		edgeOffset[0] = float4(-offset.x,offset.y,offset.z,-offset.w);
 		edgeOffset[1] = float4(offset.x,offset.y,offset.z,offset.w);
 		edgeOffset[2] = float4(-offset.x*2.0,offset.y,offset.z,-offset.w*2.0);
+
 		float2 depthEdges = DepthEdgeEstimation(texcoord, edgeOffset);
 		return float3(depthEdges, 0.0);
 	}
@@ -885,16 +845,6 @@ float3 SMAANeighborhoodBlendingWrapPS(
 }
 
 //////////////////////////////////////////////////////// SMOOTHING ////////////////////////////////////////////////////////////////////////
-/**
- * Calculates luma and stores it. Hoped to use it in TSMAASmoothingPS for optimisation, but TSMAASmoothingPS
- * couldn't work with its results. Keeping this in case I can fix it somewhere down the line.
- */
-// float ESMAALumaCalcPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0) : SV_Target
-// {
-// 	//TODO: see if gamma sampling gives different results
-// 	float3 col = SMAASampleLevelZero(colorGammaSampler, texcoord).rgb;
-// 	return dot(col, SMAA_LUMA_REF);
-// }
 
 /**
  * Algorithm called 'smoothing', found in Lordbean's TSMAA. 
@@ -1089,7 +1039,6 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float depth = ReShade::GetLinearizedDepth(texcoord);
 	bool background = ESMAADisableBackgroundSoftening && depth > ESMAA_BACKGROUND_DEPTH_THRESHOLD;
 
-
 	bool earlyReturn = !ESMAAEnableSoftening || noDelta || background;
 	
 	// pattern:
@@ -1188,17 +1137,6 @@ technique ESMAA
 		VertexShader = TSMAANeighborhoodBlendingVS;
 		PixelShader = ESMAASofteningPS;
 	}
-	// pass LumaBuffering
-	// {
-	// 	VertexShader = PostProcessVS;
-	// 	PixelShader = ESMAALumaCalcPS;
-	// 	RenderTarget = lumaTex;
-	// 	// ClearRenderTargets = true;
-	// 	// StencilEnable = true;
-	// 	// StencilPass = KEEP;
-	// 	// StencilFunc = EQUAL;
-	// 	// StencilRef = 1;
-	// }
 	pass ImageSmoothing
 	{
 		VertexShader = TSMAANeighborhoodBlendingVS;
