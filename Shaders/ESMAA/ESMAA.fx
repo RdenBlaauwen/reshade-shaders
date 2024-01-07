@@ -13,7 +13,7 @@
  */
 
 #include "../shared/lib.fxh"
-#include "ESMAACore.fxh"
+// #include "ESMAACore.fxh"
 
 //------------------- Preprocessor Settings -------------------
 
@@ -267,28 +267,6 @@ uniform uint ESMAASmoothingMaxIterations <
 // #define SMAA_LUMA_REF LUMA_WEIGHTS // weights for luma calculations
 #define __TSMAA_EDGE_THRESHOLD (EdgeDetectionThreshold)
 
-#define ESMAAmax4(w,x,y,z) max(max(w,x),max(y,z))
-#define ESMAAmax5(v,w,x,y,z) max(max(max(v,w),x),max(y,z))
-#define ESMAAmax9(r,s,t,u,v,w,x,y,z) max(max(max(max(r,s),t),max(u,v)),max(max(w,x),max(y,z)))
-
-#define ESMAAmin4(w,x,y,z) min(min(w,x),min(y,z))
-#define ESMAAmin5(v,w,x,y,z) min(min(min(v,w),x),min(y,z))
-#define ESMAAmin9(r,s,t,u,v,w,x,y,z) min(min(min(min(r,s),t),min(u,v)),min(min(w,x),min(y,z)))
-
-// #define ESMAAmax4(w,x,y,z) max4(w,x,y,z)
-// #define ESMAAmax5(v,w,x,y,z) max5(v,w,x,y,z)
-// #define ESMAAmax9(r,s,t,u,v,w,x,y,z) max9(r,s,t,u,v,w,x,y,z)
-
-// #define ESMAAmin4(w,x,y,z) min4(w,x,y,z)
-// #define ESMAAmin5(v,w,x,y,z) min5(v,w,x,y,z)
-// #define ESMAAmin9(r,s,t,u,v,w,x,y,z) min9(r,s,t,u,v,w,x,y,z)
-
-#define ESMAAdotmax(x) max(max((x).r, (x).g), (x).b)
-#define ESMAAdotmin(x) min(min((x).r, (x).g), (x).b)
-
-// #define ESMAAdotmax(x) maxComp(x)
-// #define ESMAAdotmin(x) minComp(x)
-
 #if (__RENDERER__ == 0xb000 || __RENDERER__ == 0xb100)
 	#define SMAAGather(tex, coord) tex2Dgather(tex, coord, 0)
 #endif
@@ -382,68 +360,35 @@ sampler searchSampler
 	SRGBTexture = false;
 };
 
-float sum(float3 vc){
-	return vc.x + vc.y + vc.z;
-}
-
-float sum(float4 vc){
-	return sum(vc.xyz) + vc.w;
-}
-
-float avg(float3 vc){
-	return sum(vc) / 3.0;
-}
-
-float avg(float4 vc){
-	return sum(vc) / 4.0;
-}
-
-float avg(float x,float y,float z,float w){
-	return avg(float4(x,y,z,w));
-}
-
 // Used in the Softening pass to calculate the blending strength based
 float getBlendingStrength(float4 weightData, float weightAvg, float edgeAvg){
 	float strength;
 	if(ESMAAAnomalousPixelBlendingStrengthMethod == 1)
 	{
-		float maxWeight = ESMAAmax4(weightData.r, weightData.g, weightData.b, weightData.a);
+		float maxWeight = Lib::max(weightData.r, weightData.g, weightData.b, weightData.a);
 		strength = weightAvg * 0.4 + maxWeight * 0.6;
 	} 
 	else if(ESMAAAnomalousPixelBlendingStrengthMethod==2)
 	{
-		float maxWeight = ESMAAmax4(weightData.r, weightData.g, weightData.b, weightData.a);
+		float maxWeight = Lib::max(weightData.r, weightData.g, weightData.b, weightData.a);
 		strength = weightAvg * 0.7 + maxWeight * 0.3;
 		strength = edgeAvg  * 0.2 + strength * 0.8;
 	}
 	else if(ESMAAAnomalousPixelBlendingStrengthMethod==3)
 	{
-		float maxWeight = ESMAAmax4(weightData.r, weightData.g, weightData.b, weightData.a);
+		float maxWeight = Lib::max(weightData.r, weightData.g, weightData.b, weightData.a);
 		strength = weightAvg * 0.4 + maxWeight * 0.6;
 		strength = edgeAvg  * 0.3 + strength * 0.7;
 	}
 	else if(ESMAAAnomalousPixelBlendingStrengthMethod==4)
 	{
-		float maxWeight = ESMAAmax4(weightData.r, weightData.g, weightData.b, weightData.a);
+		float maxWeight = Lib::max(weightData.r, weightData.g, weightData.b, weightData.a);
 		strength = (edgeAvg  + maxWeight)/2.0;
 	} 
 	else {
 		strength = weightAvg;
 	}
 	return strength;
-}
-
-/**
- * @SCALE_LINEAR
- * Meant for turning linear values super-linear: Makes it's input bigger in such a way that lower values become 
- * proportionally bigger than higher values. Output never exceeds 1.0;
- *
- * @param `val` input to be scaled
- * @return output val. Amplified in a non-linear fashion.
- */
-float scale(float val){
-    const float piHalf = 1.5707;
-	return val = sin(val * piHalf);
 }
 
 /** 
@@ -457,87 +402,13 @@ float scale(float val){
 float scaleStrength(float strength){
 	if(ESMAAAnomalousPixelScaling >= 1){ // Balanced
 		// strength = strength * (2.0 - strength); // Tests turned out this was slower
-		strength = scale(strength);
+		strength = Lib::sineScale(strength);
 	}
 	// no else-if, because it is a cumulative effect
 	if(ESMAAAnomalousPixelScaling >= 2){ // Aggressive
-		strength = scale(strength);
+		strength = Lib::sineScale(strength);
 	}
 	return strength;
-}
-
-/**
- * Finds the greatest component of an RGB coded color.
- * 
- * @param float3 rgb a color
- * @return float the greates component found in the input color
- */
-float maxComp(float3 rgb){
-	return max(rgb.r, max(rgb.g, rgb.b));
-}
-
-/**
- * Turns a non-linear value into a linear value. Typically used to turn depth into linear depth.
- * 
- * Borrowed from DisplayDepth.fx, by CeeJay.dk (with many updates and additions by the Reshade community).
- *
- * @param float nonLinear non-linear value to be converted
- * @param bool logarithmic whether the input value is logarithmic
- * @param bool reverse whether the input is reversed.
- * @return float input converted into linear
- */
-float linearize(float nonLinear, bool logarithmic, bool reversed) {
-	const float C = 0.01;
-	float linVal = nonLinear;
-	if (logarithmic) // RESHADE_DEPTH_INPUT_IS_LOGARITHMIC
-		linVal = (exp(linVal * log(C + 1.0)) - 1.0) / C;
-
-	if (reversed) // RESHADE_DEPTH_INPUT_IS_REVERSED
-		linVal = 1.0 - linVal;
-
-	const float N = 1.0;
-	linVal /= RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - linVal * (RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - N);
-
-	return linVal;
-}
-
-/**
- * A wrapper around linearize() that turns non-linear depth into linear depth.
- * Uses Reshade's environment variables to decide how to convert depth.
- *
- * @param float nonLinear non-linear value to be converted
- * @return float input converted into linear depth
- */
-float linearizeDepth(float depth) {
-	return linearize(depth, RESHADE_DEPTH_INPUT_IS_LOGARITHMIC, RESHADE_DEPTH_INPUT_IS_REVERSED);
-}
-
-//////////////////////////////////////////////////////// PIXEL INFORMATION ////////////////////////////////////////////////////////////////
-/**
- * From Lordbean's TSMAA
- */
-float dotweight(float3 middle, float3 neighbor, bool useluma, float3 weights)
-{
-	if (useluma) return dot(neighbor, weights);
-	else return dot(abs(middle - neighbor), SMAA_LUMA_REF);
-}
-
-//////////////////////////////////////////////////// SATURATION CALCULATIONS //////////////////////////////////////////////////////////////
-/**
- * From Lordbean's TSMAA
- */
-float dotsat(float3 x)
-{
-	float xl = dot(x, SMAA_LUMA_REF);
-	return ((ESMAAdotmax(x) - ESMAAdotmin(x)) / (1.0 - (2.0 * xl - 1.0) + trunc(xl)));
-}
-
-/**
- * From Lordbean's TSMAA
- */
-float dotsat(float3 rgb, float L)
-{
-	return ((ESMAAdotmax(rgb) - ESMAAdotmin(rgb)) / (1.0 - (2.0 * L - 1.0) + trunc(L)));
 }
 
 //////////////////////////////// VERTEX SHADERS ////////////////////////////////
@@ -633,29 +504,30 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 	#endif
 
 
-	float currDepth = linearizeDepth(a);
-	float topDepth = linearizeDepth(f);
-	float leftDepth = linearizeDepth(h);
+	float currDepth = Lib::linearizeDepth(a);
+	float topDepth = Lib::linearizeDepth(f);
+	float leftDepth = Lib::linearizeDepth(h);
 
+	// TODO: refactor this: encapsulate into method for this kind of scaling
 	float depthScaling = (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
 	float detectionThreshold = SMAA_DEPTH_THRESHOLD * depthScaling;
 
 	float3 neighbours = float3(currDepth, leftDepth, topDepth);
 	float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
 	float2 edges = step(detectionThreshold, delta);
-	float edgeDot = dot(edges, float2(1.0, 1.0));
+	float edgeSum = Lib::sum(edges);
 
 	// bool surface = false;
-	// if(ESMAADepthDataSurfaceCheck && edgeDot > 0.0){
+	// if(ESMAADepthDataSurfaceCheck && edgeSum > 0.0){
 	// 	float2 farDeltas;
 	// 	if(edges.r > 0.0){
 	// 		float hLeft = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(-2, 0)).r;
-	// 		float leftLeftDepth = linearizeDepth(hLeft);
+	// 		float leftLeftDepth = Lib::linearizeDepth(hLeft);
 	// 		farDeltas.r = abs(leftDepth - leftLeftDepth);
 	// 	}
 	// 	if(edges.g > 0.0){
 	// 		float fTop = SMAASampleLevelZeroOffset(ReShade::DepthBuffer, texcoord, int2(0, -2)).r;
-	// 		float topTopDepth = linearizeDepth(fTop);
+	// 		float topTopDepth = Lib::linearizeDepth(fTop);
 	// 		farDeltas.g = abs(topDepth - topTopDepth);
 	// 	}
 	// 	float2 farEdges = step(detectionThreshold,farDeltas);
@@ -663,10 +535,10 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 	// }
 
 	// Early return if there is an edge:
-    // if (!surface && edgeDot > 0.0)
+    // if (!surface && edgeSum > 0.0)
     //     return edges;
 
-	if (edgeDot > 0.0)
+	if (edgeSum > 0.0)
         return edges;
 
 	float factor = a + saturate(0.001 - a) * 2.0;
@@ -691,7 +563,7 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 		edges = step(detectionThreshold, antiDelta);
 
 		// Early return if there is an edge:
-		if (dot(edges, float2(1.0, 1.0)) > 0.0)
+		if (Lib::sum(edges) > 0.0)
 			return float2(0.0,0.0);
 	}
 
@@ -717,7 +589,7 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
 			//TODO: use log delta instead of linear delta
 			// cause this is an apples and pears comparison
 			float2 res = step(localDelta * 4.0, delta);
-			if(dot(res,float2(1.0,1.0)) == 1.0){
+			if(Lib::sum(res) == 1.0){
 				return res;
 			}
 		}
@@ -738,12 +610,13 @@ float2 DepthEdgeEstimation(float2 texcoord, float4 offset[3])
  * 	Can be somehting like a luma or an rgb component
  * @return float2 with the scaled threshold twice, for easy use in edge thresholding
  */
-float2 getScaledThreshold(float input){
-	float scaled = saturate(input * ESMAAThreshScaleFactor);
-	// Makes ESMAAThresholdFloor the minimum value
-	float scaledAndFloored = max(ESMAAThresholdFloor, scaled);
-	float scaledThreshold = SMAA_THRESHOLD * scaledAndFloored;
-	return float2(scaledThreshold, scaledThreshold);
+float2 getThresholdScale(float input){
+	return Lib::clampScale(
+		input, 
+		ESMAAThreshScaleFactor, 
+		ESMAAThresholdFloor, 
+		1.0
+		);
 }
 
 /**
@@ -754,10 +627,11 @@ float2 getScaledThreshold(float input){
  * IMPORTANT NOTICE: luma edge detection requires gamma-corrected colors, and
  * thus 'colorTex' should be a non-sRGB texture.
  */
-float2 ESMAALumaEdgeDetection(float2 texcoord,
-                               float4 offset[3],
-                               SMAATexture2D(colorTex)
-															) {
+float2 ESMAALumaEdgeDetection(
+		float2 texcoord,
+		float4 offset[3],
+		SMAATexture2D(colorTex)
+	) {
 	// Calculate lumas:
 	float3 weights = SMAA_LUMA_REF;
 	float L = dot(SMAASamplePoint(colorTex, texcoord).rgb, weights);
@@ -767,15 +641,13 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
 
 	// ADAPTIVE THRESHOLD START
 	float maxLuma;
-	float2 threshold;
+	float2 threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
 	if(ESMAAEnableAdaptiveThreshold){
 		// use biggest local luma as basis
-		maxLuma = max(L, max(Lleft, Ltop));
+		maxLuma = Lib::max(L, Lleft, Ltop);
 		// scaled maxLuma so that only dark places have a significantly lower threshold
-		threshold = getScaledThreshold(maxLuma);
-	} else {
-		threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
-	}
+		threshold *= getThresholdScale(maxLuma);
+	} 
 	// ADAPTIVE THRESHOLD END
 
     // We do the usual threshold:
@@ -784,7 +656,7 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
     float2 edges = step(threshold, delta.xy);
 
     // Early return if there is no edge:
-    if (dot(edges, float2(1.0, 1.0)) == 0.0)
+    if (!Lib::any(edges))
         return edges;
 
     // Calculate right and bottom deltas:
@@ -806,7 +678,7 @@ float2 ESMAALumaEdgeDetection(float2 texcoord,
 		// get the greates from  ALL lumas this time
 		float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
 		// scaled maxLuma so that only dark places have a significantly lower threshold
-		threshold = getScaledThreshold(finalMaxLuma);
+		threshold *= getThresholdScale(finalMaxLuma);
 		// edges set to 1 if delta greater than threshold, else set to 0
 		edges = step(threshold, delta.xy);
 	}
@@ -841,22 +713,24 @@ float2 ESMAAChromaEdgeDetection(float2 texcoord,
 
     float3 Cleft = SMAASamplePoint(colorTex, offset[0].xy).rgb;
     float3 t = abs(C - Cleft);
-    delta.x = max(max(t.r, t.g), t.b);
+    delta.x = Lib::max(t);
 
     float3 Ctop  = SMAASamplePoint(colorTex, offset[0].zw).rgb;
     t = abs(C - Ctop);
-    delta.y = max(max(t.r, t.g), t.b);
+    delta.y = Lib::max(t);
 
 	// ADAPTIVE THRESHOLD START
 
 	float maxChroma;
-	float2 threshold;
+	float2 threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
 	if(ESMAAEnableAdaptiveThreshold){
-		maxChroma = max(maxComp(C),max(maxComp(Cleft),maxComp(Ctop)));
+		maxChroma = Lib::max(
+			Lib::max(C),
+			Lib::max(Cleft),
+			Lib::max(Ctop)
+		);
 		// scale maxChroma so that only dark places have a significantly lower threshold
-		threshold = getScaledThreshold(maxChroma);
-	} else {
-		threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
+		threshold *= getThresholdScale(maxChroma);
 	}
 
 	// ADAPTIVE THRESHOLD END
@@ -865,17 +739,17 @@ float2 ESMAAChromaEdgeDetection(float2 texcoord,
     float2 edges = step(threshold, delta.xy);
 
     // Early return if there is no edge:
-    if (dot(edges, float2(1.0, 1.0)) == 0.0)
+    if (!Lib::any(edges))
         return edges;
 
     // Calculate right and bottom deltas:
     float3 Cright = SMAASamplePoint(colorTex, offset[1].xy).rgb;
     t = abs(C - Cright);
-    delta.z = max(max(t.r, t.g), t.b);
+    delta.z = Lib::max(t);
 
     float3 Cbottom  = SMAASamplePoint(colorTex, offset[1].zw).rgb;
     t = abs(C - Cbottom);
-    delta.w = max(max(t.r, t.g), t.b);
+    delta.w = Lib::max(t);
 
     // Calculate the maximum delta in the direct neighborhood:
     float2 maxDelta = max(delta.xy, delta.zw);
@@ -883,11 +757,11 @@ float2 ESMAAChromaEdgeDetection(float2 texcoord,
     // Calculate left-left and top-top deltas:
     float3 Cleftleft  = SMAASamplePoint(colorTex, offset[2].xy).rgb;
     t = abs(Cleft - Cleftleft);
-    delta.z = max(max(t.r, t.g), t.b);
+    delta.z = Lib::max(t);
 
     float3 Ctoptop = SMAASamplePoint(colorTex, offset[2].zw).rgb;
     t = abs(Ctop - Ctoptop);
-    delta.w = max(max(t.r, t.g), t.b);
+    delta.w = Lib::max(t);
 
     // Calculate the final maximum delta:
     maxDelta = max(maxDelta.xy, delta.zw);
@@ -897,22 +771,16 @@ float2 ESMAAChromaEdgeDetection(float2 texcoord,
 
 	if(ESMAAEnableAdaptiveThreshold){
 		// take ALL greatest components into account this time
-		float finalMaxChroma = max(
+		float finalMaxChroma = Lib::max(
 			maxChroma, 
-			max(
-				maxComp(Cright), 
-				max(
-					maxComp(Cbottom),
-					max(
-						maxComp(Cleftleft),
-						maxComp(Ctoptop)
-					)
-				)
-			)
+			Lib::max(Cright), 
+			Lib::max(Cbottom),
+			Lib::max(Cleftleft),
+			Lib::max(Ctoptop)
 		);
 		// scaled finalMaxChroma so that only dark places have a significantly lower threshold
 		// Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-		threshold = getScaledThreshold(finalMaxChroma);
+		threshold *= getThresholdScale(finalMaxChroma);
 		// edges = step(threshold, delta.xy);
 		edges = step(threshold, delta.xy);
 	}
@@ -960,15 +828,15 @@ float2 ESMAAHybridEdgeDetectionPS(
 	bool edgesFound = false;
 	if(ESMAAEnableLumaEdgeDetection){
 		edges = ESMAALumaEdgeDetection(texcoord, offset, colorGammaSampler);
-		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
+		edgesFound = Lib::any(edges);
 	}
 	if(ESMAAEnableChromaEdgeDetection && !edgesFound){
 		edges = ESMAAChromaEdgeDetection(texcoord, offset, colorGammaSampler);
-		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
+		edgesFound = Lib::any(edges);
 	}
 	if(ESMAAEnableDepthEdgeDetection && !edgesFound){
 		edges = ESMAADepthEdgeDetection(texcoord, offset);
-		edgesFound = dot(edges,float2(1.0,1.0)) > 0.0;
+		edgesFound = Lib::any(edges);
 	}
 	// if(!edgesFound) discard;
 	return edges;
@@ -1050,17 +918,17 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float3 original = mid;
 	
 	float lumaM = dot(mid, SMAA_LUMA_REF);
-	float chromaM = dotsat(mid, lumaM);
+	float chromaM = Lib::dotsat(mid, lumaM);
 	bool useluma = lumaM > chromaM;
 	if (!useluma) lumaM = 0.0;
 
-	float lumaS = dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaE = dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaN = dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaW = dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, SMAA_LUMA_REF);
+	float lumaS = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaN = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, SMAA_LUMA_REF);
     
-    float rangeMax = ESMAAmax5(lumaS, lumaE, lumaN, lumaW, lumaM);
-    float rangeMin = ESMAAmin5(lumaS, lumaE, lumaN, lumaW, lumaM);
+    float rangeMax = Lib::max(lumaS, lumaE, lumaN, lumaW, lumaM);
+    float rangeMin = Lib::min(lumaS, lumaE, lumaN, lumaW, lumaM);
 	
     float range = rangeMax - rangeMin;
     
@@ -1068,10 +936,10 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     bool earlyExit = (range < __TSMAA_EDGE_THRESHOLD);
 	if (earlyExit) return original;
 
-	float lumaNW = dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaSE = dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaNE = dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaSW = dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, SMAA_LUMA_REF);
+	float lumaNW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaSE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaNE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, SMAA_LUMA_REF);
+    float lumaSW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, SMAA_LUMA_REF);
 
 	// These vals serve as caches, so they can be used later without having to redo them
 	// It's just an optimisation thing
@@ -1086,8 +954,8 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float lengthSign = horzSpan ? BUFFER_RCP_HEIGHT : BUFFER_RCP_WIDTH;
 	
 	bool smaahoriz = max(midWeights.x, midWeights.z) > max(midWeights.y, midWeights.w);
-    bool smaadata = dot(midWeights, float4(1,1,1,1)) != 0.0;
-	float maxblending = 0.5 + (0.5 * ESMAAmax4(midWeights.r, midWeights.g, midWeights.b, midWeights.a));
+    bool smaadata = Lib::sum(midWeights) != 0.0;
+	float maxblending = 0.5 + (0.5 * Lib::max(midWeights.r, midWeights.g, midWeights.b, midWeights.a));
 	if (((horzSpan) && ((smaahoriz) && (smaadata))) || ((!horzSpan) && ((!smaahoriz) && (smaadata)))) maxblending *= 0.5;
     else maxblending = min(maxblending * 1.5, 1.0);
 
@@ -1112,8 +980,8 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float2 posN = posB - offNP;
     float2 posP = posB + offNP;
 
-	float lumaEndN = dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
-    float lumaEndP = dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
+	float lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
+    float lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
 	
     float gradientScaled = max(abs(gradientN), abs(gradientS)) * 0.25;
     bool lumaMLTZero = mad(0.5, -lumaNN, lumaM) < 0.0;
@@ -1140,7 +1008,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			{
 				posN -= offNP;
 				// lumaEndN = dotweightopt(mid, posN, useluma);
-				lumaEndN = dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
+				lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
 				lumaEndN -= lumaNN;
 				doneN = abs(lumaEndN) >= gradientScaled;
 			}
@@ -1148,7 +1016,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			{
 				posP += offNP;
 				// lumaEndP = dotweightopt(mid, posP, useluma);
-				lumaEndP = dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
+				lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
 				lumaEndP -= lumaNN;
 				doneP = abs(lumaEndP) >= gradientScaled;
 			}
@@ -1212,8 +1080,8 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 		SMAASampleLevelZero(edgesSampler, offset.zw).g
 	); 
 
-	float weightSum = sum(weightData);
-	float edgeSum = sum(edgeData);
+	float weightSum = Lib::sum(weightData);
+	float edgeSum = Lib::sum(edgeData);
     bool noDelta = (weightSum + edgeSum) == 0.0;
 
 	// If background softening is disabled, return early if 
@@ -1266,8 +1134,8 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 square = (e + g + i + d) / 4.0;
 	
 	// Get the most divergent shapes..
-	float3 highterm = ESMAAmax9(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
-	float3 lowterm = ESMAAmin9(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
+	float3 highterm = Lib::max(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
+	float3 lowterm = Lib::min(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
 	// ...and subtract them from the average of all shapes
 	float3 localavg = ((a + x1 + x2 + x3 + xy1 + xy2 + diamond + square + cap + bucket) - (highterm + lowterm)) / 8.0;
 
