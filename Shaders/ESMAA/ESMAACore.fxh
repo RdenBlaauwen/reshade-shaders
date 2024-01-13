@@ -14,7 +14,7 @@
 
 namespace ESMAACore
 {
-  namespace predication
+  namespace Predication
   {
     /**
     * This function is meant for edge predication. It detects geometric edges using depth-detection with high accuracy, but in a symmetric fashion.
