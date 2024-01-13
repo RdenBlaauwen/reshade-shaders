@@ -21,31 +21,48 @@ namespace ESMAACore
     * Which means it detects pixels around both sides of edges. This ironically makes it pretty bad for real edge detecion,
     * but potentially great for edge predication. I like to call it "edge prediction".
     * 
-    * It works in two phases. First it does conventional edge-based edge detection. If this finds anything, it returns early.
+    * It works in two phases. First it does conventional predication using depth-based edge detection, just like normal SMAA. 
+    * If this finds anything, it returns early. This will henceforth be refered to as "edge detection".
     * Otherwise it continues to do the "edge prediction" as described above. 
     * 
     * Strange as it may sound, this is actually a highly modified version of Lordbean's image softening,
-    * adapted to use depth info instead. Worked like a charm
+    * adapted to use depth info instead. Works like a charm.
     * 
-    * @param float2 texcoord coordinates of current texel, just like edge detection functions
-    * @param float4 offset[3] contains coordinates of 6 neighboring texels, equal to the ones used in edge detection functions
-    * @return float2 contains 2 numbers (RG channels) representing left and top edge, ranging from 0.0 - 1.0. 
-    * 	1.0 meaning a geometric edge is definitely there
-    *	0.0 meaning there is no geometric edge
-    *	anything in between is a "maybe".
+    * @param texcoord: float2 Coordinates of current texel, just like edge detection functions.
+    * @param offset[3]: float4[3] Contains coordinates of 6 neighboring texels, equal to the ones used in edge detection functions.
+    * @param ESMAASampler2D(depthSampler) Depthbuffer sampler. Assumes depthbuffer is logarithmic, and not reverted.
+    * @param detectionThresh: float Used to detect presence of edges with high certainty. 
+    *   Same as normal SMAA predication threshold. 
+    *   Used for detecting (possible) edges with linearized depth, just like normal SMAA predication.
+    *   Asymmetric, only detects edges to left and top.
+    * @param predictionThresh: float Used to detect presence of edges with low certainty.
+    *   Used for detecting possible edges with non-linear depth.
+    *   Symmetric, detects possibility of edges in any direction. Can not distinguish between directions.
+    * @param useOpposingEdgesCheck: bool Checks if edges can be detected to the right and bottom with high certainty.
+    *   using detectionThresh and linearized depths. If any are found, it means the current texel is likely on the wrong side of edge,
+    *   which leads to an early return with return val float2(0.0,0.0). Helps to make edge prediction more asymmetric.
+    * @param compareLeftAndTopDeltaWithLocalAvg: bool Checks if delta between left and top is much greater than delta with local avg.
+    *   This happens AFTER edge detection has failed.
+    *   If true, return 1.0 for each significantly larger edge, instead of the normal 0.5 that edge prediction returns.
+    *   Helps to detect presence of edges with higher certainty.
+    *   Warning: Experimental, recommended value: false.
+    * @return float2 Contains 2 numbers (RG channels) representing left and top edge, ranging from 0.0 - 1.0. 
+    * 	1.0 meaning a geometric edge is definitely there.
+    *	  0.0 meaning there is no geometric edge.
+    *	  Anything in between is a "maybe".
     *
     * Warning: if this function returns a 1.0 somewhere it should not be assumed there is definitively an edge, as there is sometimes
-    * a disconnect between geometric and visual info.
+    * a disconnect between geometric and visual data.
     * Warning: do NOT use this as a true edge-detection algo. It WILL lead to false positives and artifacts!
     */
     float2 DepthEdgeEstimation(
       float2 texcoord, 
       float4 offset[3],
       ESMAASampler2D(depthSampler), 
-      float threshold,
-      float predicationThreshold,
-      bool useAntiNeighbourCheck,
-      bool useSymmetricPredication
+      float detectionThresh,
+      float predictionThresh,
+      bool useOpposingEdgesCheck,
+      bool compareLeftAndTopDeltaWithLocalAvg
       )
     {
       // pattern:
@@ -75,8 +92,11 @@ namespace ESMAACore
       float topDepth = Lib::linearizeDepth(f);
       float leftDepth = Lib::linearizeDepth(h);
 
+      // Scale so that the treshold is lower closeup, higher at medium distances, and much lower far away.
+      // TODO: refactor, isolate into separate function.
+      // TODO: See if replacing by lookup table improves performance.
       float depthScaling = (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
-      float detectionThreshold = threshold * depthScaling;
+      float detectionThreshold = detectionThresh * depthScaling;
 
       float3 neighbours = float3(currDepth, leftDepth, topDepth);
       float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
@@ -108,7 +128,7 @@ namespace ESMAACore
             return edges;
 
       float factor = a + saturate(0.001 - a) * 2.0;
-      float predictionThreshold = predicationThreshold * factor;
+      predictionThresh *= factor;
 
       float b,c,d;
       #if ESMAA_RENDERER >= ESMAA_RENDERER_D3D10 // if DX10 or above
@@ -123,10 +143,12 @@ namespace ESMAACore
         d = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, 1)).r;
       #endif
 
-      if(useAntiNeighbourCheck){
-        float3 antiNeighbs = float3(a, b, c);
-        float2 antiDelta = abs(antiNeighbs.xx - float2(antiNeighbs.y, antiNeighbs.z));
-        edges = step(detectionThreshold, antiDelta);
+      // TODO: consider only doing early return if all edges are negated by an opposing edge
+      // rather than detection of any opposing edge.
+      if(useOpposingEdgesCheck){
+        float3 oppNeighbs = float3(a, b, c);
+        float2 oppDelta = abs(oppNeighbs.xx - float2(oppNeighbs.y, oppNeighbs.z));
+        edges = step(detectionThreshold, oppDelta);
 
         // Early return if there is an edge:
         if (Lib::any(edges))
@@ -147,18 +169,21 @@ namespace ESMAACore
 
       float localDelta = abs(a - localAvg);
 
-      if (localDelta > predictionThreshold) {
-        if(useSymmetricPredication){
-          // If delta between top, left and current is much greater than 
-          // delta of localaverage, return 1.0 for each detected edge
-          //TODO: use log delta instead of linear delta
-          // cause this is an apples and pears comparison
+      if (localDelta > predictionThresh) {
+        // TODO: Try using this to filter when opposing edges are greater than avg.
+        if(compareLeftAndTopDeltaWithLocalAvg){
+          // If delta between top, left and current is much greater than
+          // delta of localaverage, return 1.0 for each detected edge.
+          //TODO: Use log delta instead of linear delta,
+          // because this is an apples and oranges comparison.
           float2 res = step(localDelta * 4.0, delta);
+          // TODO: Shouldn't this be >= 1.0?
           if(Lib::sum(res) == 1.0){
             return res;
           }
         }
-        // This is like saying "Maybe there's an edge here, maybe there isn't. Please keep an eye out for jaggies just in case."
+        // This is like saying "Maybe there's an edge here, maybe there isn't. 
+        // Please keep an eye out for jaggies just in case.".
         return float2(0.5, 0.5); 
       }
       return float2(0.0, 0.0);
@@ -168,16 +193,16 @@ namespace ESMAACore
   namespace EdgeDetection
   {
     /**
-    * Used in edge detection methods to adapt threshold to magnitude of local pixels
     * Scales the input value so that lower and middle values get relatively bigger.
+    * Result is clamped between floor and 1.0.
     * Useful for situation where extreme values shouldn't have a disproportionate effect.
-    * Result is clamped between threshold floor and 1.0.
     * 
-    * @param input some factor with a value of threshold floor 0.0 - 1.0, used to scale the threshold
-    * 	Can be somehting like a luma or an rgb component
-    * @return float2 with the scaled threshold twice, for easy use in edge thresholding
+    * @param input: float Some factor with a value of 0.0 - 1.0.
+    * @param floor: float The minimum output.
+    * @param scaleFactor: float The factor by which the input is multiplied.
+    * @return float Factor that represents scaling strength. multiply threshold by this factor.
     */
-    float2 getThresholdScale(float input, float floor, float scaleFactor){
+    float getThresholdScale(float input, float floor, float scaleFactor){
       return Lib::clampScale(
         input, 
         scaleFactor, 
@@ -192,6 +217,31 @@ namespace ESMAACore
     *
     * IMPORTANT NOTICE: luma edge detection requires gamma-corrected colors, and
     * thus 'colorTex' should be a non-sRGB texture.
+    *
+    * @param texcoord: float2 Coordinates of current texel, represented by float values of 0.0 - 1.0.
+    * @param offset[3]: float[3] Coordinates of neighbours.
+    *   offset[0].xy: left neighbour.
+    *   offset[0].zw: top neighbour.
+    *   offset[1].xy: right neighbour.
+    *   offset[1].zw: bottom neighbour.
+    *   offset[2].xy: left neighbour twice removed.
+    *   offset[2].zw: left neighbour twice removed.
+    * @param ESMAASampler2D(colorTex) 2D sampler for gamma-corrected colors.
+    *   texture properties:
+    *     AddressU = Clamp; AddressV = Clamp;
+	  *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
+	  *     SRGBTexture = false;
+    * @param baseThreshold: float The threshold that any delta must cross before being considered an edge.
+    * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
+    * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
+    *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
+    * @param threshScaleFloor: float Lowest value that the threshold can be lowered to.
+    * @param threshScaleFactor: float Factor by which local max intensity is multiplied before clamping between 0.0 - 1.0
+    *   Values above 1.0 means threshold is lowered less, prevents dark areas from having ridiculously low thresholds.
+    * @return float2 Whether edges have been detected to left and top. 
+    *   0.0 means no edge detected, 1.0 means edge detected. Nothing in between.
+    *   x: Represents edge with left texel.
+    *   y: Represents edge with top texel.
     */
     float2 LumaDetection(
       float2 texcoord,
@@ -274,6 +324,31 @@ namespace ESMAACore
     *
     * IMPORTANT NOTICE: color edge detection requires gamma-corrected colors, and
     * thus 'colorTex' should be a non-sRGB texture.
+    *
+    * @param texcoord: float2 Coordinates of current texel, represented by float values of 0.0 - 1.0.
+    * @param offset[3]: float[3] Coordinates of neighbours.
+    *   offset[0].xy: left neighbour.
+    *   offset[0].zw: top neighbour.
+    *   offset[1].xy: right neighbour.
+    *   offset[1].zw: bottom neighbour.
+    *   offset[2].xy: left neighbour twice removed.
+    *   offset[2].zw: left neighbour twice removed.
+    * @param ESMAASampler2D(colorTex) 2D sampler for gamma-corrected colors.
+    *   texture properties:
+    *     AddressU = Clamp; AddressV = Clamp;
+	  *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
+	  *     SRGBTexture = false;
+    * @param baseThreshold: float The threshold that any delta must cross before being considered an edge.
+    * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
+    * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
+    *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
+    * @param threshScaleFloor: float Lowest value that the threshold can be lowered to.
+    * @param threshScaleFactor: float Factor by which local max intensity is multiplied before clamping between 0.0 - 1.0
+    *   Values above 1.0 means threshold is lowered less, prevents dark areas from having ridiculously low thresholds.
+    * @return float2 Whether edges have been detected to left and top. 
+    *   0.0 means no edge detected, 1.0 means edge detected. Nothing in between.
+    *   x: Represents edge with left texel.
+    *   y: Represents edge with top texel.
     */
     float2 ChromaDetection(
       float2 texcoord,
