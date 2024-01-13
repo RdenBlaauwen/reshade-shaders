@@ -5,7 +5,7 @@
 #define ESMAASample(tex, coord) tex2D(tex, coord)
 #define ESMAASamplePoint(tex, coord) ESMAASample(tex, coord)
 #define ESMAASampleLevelZeroOffset(tex, coord, offset) tex2Dlodoffset(tex, float4(coord, coord), offset)
-#define ESMAAGatherRed(tex, coord) tex2Dgatheroffset(tex, texcoord, 0);
+#define ESMAAGatherRed(tex, coord) tex2Dgather(tex, texcoord, 0);
 #define ESMAAGatherRedOffset(tex, coord, offset) tex2Dgatheroffset(tex, texcoord, offset, 0);
 
 #define ESMAA_RENDERER __RENDERER__
@@ -16,23 +16,6 @@ namespace ESMAACore
 {
   namespace predication
   {
-    /**
-    * Used in edge detection methods to adapt threshold to magnitude of local pixels
-    * Scales the input value so that lower and middle values get relatively bigger.
-    * Useful for situation where extreme values shouldn't have a disproportionate effect.
-    * Result is clamped between threshold floor and 1.0.
-    * 
-    * @param input some factor with a value of threshold floor 0.0 - 1.0, used to scale the threshold
-    * 	Can be somehting like a luma or an rgb component
-    * @return float2 with the scaled threshold twice, for easy use in edge thresholding
-    */
-    float2 getScaledThreshold(float input, float baseThreshold, float scaleModifier, float threshFloor)
-    {
-      float factor = clampedScale(input, scaleModifier, threshFloor, 1.0);
-      float scaledThreshold = baseThreshold * factor;
-      return float2(scaledThreshold, scaledThreshold);
-    }
-
     /**
     * This function is meant for edge predication. It detects geometric edges using depth-detection with high accuracy, but in a symmetric fashion.
     * Which means it detects pixels around both sides of edges. This ironically makes it pretty bad for real edge detecion,
@@ -58,7 +41,7 @@ namespace ESMAACore
     float2 DepthEdgeEstimation(
       float2 texcoord, 
       float4 offset[3],
-      SMAATexture2D(depthSampler), 
+      ESMAASampler2D(depthSampler), 
       float threshold,
       float predicationThreshold,
       bool useAntiNeighbourCheck,
@@ -98,10 +81,10 @@ namespace ESMAACore
       float3 neighbours = float3(currDepth, leftDepth, topDepth);
       float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
       float2 edges = step(detectionThreshold, delta);
-      float edgeDot = dot(edges, float2(1.0, 1.0));
+      bool anyEdges = Lib::any(edges);
 
       // bool surface = false;
-      // if(ESMAADepthDataSurfaceCheck && edgeDot > 0.0){
+      // if(ESMAADepthDataSurfaceCheck && anyEdges > 0.0){
       // 	float2 farDeltas;
       // 	if(edges.r > 0.0){
       // 		float hLeft = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-2, 0)).r;
@@ -118,10 +101,10 @@ namespace ESMAACore
       // }
 
       // Early return if there is an edge:
-        // if (!surface && edgeDot > 0.0)
+        // if (!surface && anyEdges > 0.0)
         //     return edges;
 
-      if (edgeDot > 0.0)
+      if (anyEdges)
             return edges;
 
       float factor = a + saturate(0.001 - a) * 2.0;
@@ -146,8 +129,8 @@ namespace ESMAACore
         edges = step(detectionThreshold, antiDelta);
 
         // Early return if there is an edge:
-        if (dot(edges, float2(1.0, 1.0)) > 0.0)
-          return float2(0.0,0.0);
+        if (Lib::any(edges))
+          return float2(0.0, 0.0);
       }
 
       // float x1 = (e + f + g) / 3.0;
@@ -171,19 +154,37 @@ namespace ESMAACore
           //TODO: use log delta instead of linear delta
           // cause this is an apples and pears comparison
           float2 res = step(localDelta * 4.0, delta);
-          if(dot(res,float2(1.0,1.0)) == 1.0){
+          if(Lib::sum(res) == 1.0){
             return res;
           }
         }
         // This is like saying "Maybe there's an edge here, maybe there isn't. Please keep an eye out for jaggies just in case."
-        return float2(0.5,0.5); 
+        return float2(0.5, 0.5); 
       }
-      return float2(0.0,0.0);
+      return float2(0.0, 0.0);
     }
   }
 
   namespace EdgeDetection
   {
+    /**
+    * Used in edge detection methods to adapt threshold to magnitude of local pixels
+    * Scales the input value so that lower and middle values get relatively bigger.
+    * Useful for situation where extreme values shouldn't have a disproportionate effect.
+    * Result is clamped between threshold floor and 1.0.
+    * 
+    * @param input some factor with a value of threshold floor 0.0 - 1.0, used to scale the threshold
+    * 	Can be somehting like a luma or an rgb component
+    * @return float2 with the scaled threshold twice, for easy use in edge thresholding
+    */
+    float2 getThresholdScale(float input, float floor, float scaleFactor){
+      return Lib::clampScale(
+        input, 
+        scaleFactor, 
+        floor, 
+        1.0
+        );
+    }
     /**
     * Luma Edge Detection taken and adapted from the official SMAA.fxh file, provided by the original team. (TODO: fix credits)
     * Adapted to use adaptive thresholding. 
@@ -198,7 +199,9 @@ namespace ESMAACore
       ESMAASampler2D(colorTex),
       float baseThreshold,
       float localContrastAdaptationFactor,
-      bool enableAdaptiveThreshold
+      bool enableAdaptiveThreshold,
+      float threshScaleFloor,
+      float threshScaleFactor
     ) {
       // Calculate lumas:
       float3 weights = ESMAA_LUMA_REF; // TODO: consider turning into param
@@ -209,24 +212,22 @@ namespace ESMAACore
 
       // ADAPTIVE THRESHOLD START
       float maxLuma;
-      float2 thresholds;
+      float2 threshold = float2(baseThreshold, baseThreshold);
       if(enableAdaptiveThreshold){
         // use biggest local luma as basis
-        maxLuma = max(L, max(Lleft, Ltop));
-        // scaled maxLuma so that only dark places have a significantly lower thresholds
-        thresholds = getScaledThreshold(maxLuma);
-      } else {
-        thresholds = float2(baseThreshold, baseThreshold);
-      }
+        maxLuma = Lib::max(L, Lleft, Ltop);
+        // scaled maxLuma so that only dark places have a significantly lower threshold
+        threshold *= getThresholdScale(maxLuma, threshScaleFloor, threshScaleFactor);
+      } 
       // ADAPTIVE THRESHOLD END
 
         // We do the usual threshold:
         float4 delta;
         delta.xy = abs(L - float2(Lleft, Ltop));
-        float2 edges = step(thresholds, delta.xy);
+        float2 edges = step(threshold, delta.xy);
 
         // Early return if there is no edge:
-        if (dot(edges, float2(1.0, 1.0)) == 0.0)
+        if (!Lib::any(edges))
             return edges;
 
         // Calculate right and bottom deltas:
@@ -246,11 +247,12 @@ namespace ESMAACore
 
       if(enableAdaptiveThreshold){
         // get the greates from  ALL lumas this time
-        float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
+        // float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
+        float finalMaxLuma = Lib::max(maxLuma, Lright, Lbottom, Lleftleft, Ltoptop);
         // scaled maxLuma so that only dark places have a significantly lower threshold
-        thresholds = getScaledThreshold(finalMaxLuma);
+        threshold *= getThresholdScale(finalMaxLuma, threshScaleFloor, threshScaleFactor);
         // edges set to 1 if delta greater than thresholds, else set to 0
-        edges = step(thresholds, delta.xy);
+        edges = step(threshold, delta.xy);
       }
 
       // ADAPTIVE THRESHOLD second threshold check END
@@ -279,7 +281,9 @@ namespace ESMAACore
       ESMAASampler2D(colorTex),
       float baseThreshold,
       float localContrastAdaptationFactor,
-      bool enableAdaptiveThreshold
+      bool enableAdaptiveThreshold,
+      float threshScaleFloor,
+      float threshScaleFactor
     ) {
         // Calculate color deltas:
         float4 delta;
@@ -287,41 +291,43 @@ namespace ESMAACore
 
         float3 Cleft = ESMAASamplePoint(colorTex, offset[0].xy).rgb;
         float3 t = abs(C - Cleft);
-        delta.x = max(max(t.r, t.g), t.b);
+        delta.x = Lib::max(t);
 
         float3 Ctop  = ESMAASamplePoint(colorTex, offset[0].zw).rgb;
         t = abs(C - Ctop);
-        delta.y = max(max(t.r, t.g), t.b);
+        delta.y = Lib::max(t);
 
       // ADAPTIVE THRESHOLD START
 
       float maxChroma;
-      float2 thresholds;
+      float2 threshold = float2(baseThreshold, baseThreshold);
       if(enableAdaptiveThreshold){
-        maxChroma = max(Lib::maxComp(C),max(Lib::maxComp(Cleft),Lib::maxComp(Ctop)));
-        // scale maxChroma so that only dark places have a significantly lower thresholds
-        thresholds = getScaledThreshold(maxChroma);
-      } else {
-        thresholds = float2(baseThreshold, baseThreshold);
+        maxChroma = Lib::max(
+          Lib::max(C),
+          Lib::max(Cleft),
+          Lib::max(Ctop)
+        );
+        // scale maxChroma so that only dark places have a significantly lower threshold
+        threshold *= getThresholdScale(maxChroma, threshScaleFloor, threshScaleFactor);
       }
 
       // ADAPTIVE THRESHOLD END
 
         // We do the usual threshold:
-        float2 edges = step(thresholds, delta.xy);
+        float2 edges = step(threshold, delta.xy);
 
         // Early return if there is no edge:
-        if (dot(edges, float2(1.0, 1.0)) == 0.0)
+        if (!Lib::any(edges))
             return edges;
 
         // Calculate right and bottom deltas:
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
         t = abs(C - Cright);
-        delta.z = max(max(t.r, t.g), t.b);
+        delta.z = Lib::max(t);
 
         float3 Cbottom  = ESMAASamplePoint(colorTex, offset[1].zw).rgb;
         t = abs(C - Cbottom);
-        delta.w = max(max(t.r, t.g), t.b);
+        delta.w = Lib::max(t);
 
         // Calculate the maximum delta in the direct neighborhood:
         float2 maxDelta = max(delta.xy, delta.zw);
@@ -329,11 +335,11 @@ namespace ESMAACore
         // Calculate left-left and top-top deltas:
         float3 Cleftleft  = ESMAASamplePoint(colorTex, offset[2].xy).rgb;
         t = abs(Cleft - Cleftleft);
-        delta.z = max(max(t.r, t.g), t.b);
+        delta.z = Lib::max(t);
 
         float3 Ctoptop = ESMAASamplePoint(colorTex, offset[2].zw).rgb;
         t = abs(Ctop - Ctoptop);
-        delta.w = max(max(t.r, t.g), t.b);
+        delta.w = Lib::max(t);
 
         // Calculate the final maximum delta:
         maxDelta = max(maxDelta.xy, delta.zw);
@@ -343,24 +349,18 @@ namespace ESMAACore
 
       if(enableAdaptiveThreshold){
         // take ALL greatest components into account this time
-        float finalMaxChroma = max(
+        float finalMaxChroma = Lib::max(
           maxChroma, 
-          max(
-            Lib::maxComp(Cright), 
-            max(
-              Lib::maxComp(Cbottom),
-              max(
-                Lib::maxComp(Cleftleft),
-                Lib::maxComp(Ctoptop)
-              )
-            )
-          )
+          Lib::max(Cright), 
+          Lib::max(Cbottom),
+          Lib::max(Cleftleft),
+          Lib::max(Ctoptop)
         );
         // scaled finalMaxChroma so that only dark places have a significantly lower threshold
         // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-        thresholds = getScaledThreshold(finalMaxChroma);
+        threshold *= getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
         // edges = step(threshold, delta.xy);
-        edges = step(thresholds, delta.xy);
+        edges = step(threshold, delta.xy);
       }
       
       // ADAPTIVE THRESHOLD second threshold check END

@@ -12,8 +12,8 @@
  *                               for ReShade 3.0+
  */
 
-#include "../shared/lib.fxh"
-// #include "ESMAACore.fxh"
+// #include "../shared/lib.fxh"
+#include "ESMAACore.fxh"
 
 //------------------- Preprocessor Settings -------------------
 
