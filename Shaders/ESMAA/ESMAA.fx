@@ -297,7 +297,7 @@ uniform uint ESMAASmoothingMaxIterations <
 #define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
 #define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
 // weights for luma calculations
-#define ESMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722)
+#define TSMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722)
 
 /**
  * SMAA preprocessor variables, from Lordbean's ASSMAA
@@ -637,15 +637,15 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 mid = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
     float3 original = mid;
 	
-	float lumaM = dot(mid, ESMAA_LUMA_REF);
+	float lumaM = dot(mid, TSMAA_LUMA_REF);
 	float chromaM = Lib::dotsat(mid, lumaM);
 	bool useluma = lumaM > chromaM;
 	if (!useluma) lumaM = 0.0;
 
-	float lumaS = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, ESMAA_LUMA_REF);
-    float lumaE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, ESMAA_LUMA_REF);
-    float lumaN = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, ESMAA_LUMA_REF);
-    float lumaW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, ESMAA_LUMA_REF);
+	float lumaS = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, TSMAA_LUMA_REF);
+    float lumaE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, TSMAA_LUMA_REF);
+    float lumaN = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, TSMAA_LUMA_REF);
+    float lumaW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, TSMAA_LUMA_REF);
     
     float rangeMax = Lib::max(lumaS, lumaE, lumaN, lumaW, lumaM);
     float rangeMin = Lib::min(lumaS, lumaE, lumaN, lumaW, lumaM);
@@ -656,10 +656,10 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     bool earlyExit = (range < __TSMAA_EDGE_THRESHOLD);
 	if (earlyExit) return original;
 
-	float lumaNW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, ESMAA_LUMA_REF);
-    float lumaSE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, ESMAA_LUMA_REF);
-    float lumaNE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, ESMAA_LUMA_REF);
-    float lumaSW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, ESMAA_LUMA_REF);
+	float lumaNW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, TSMAA_LUMA_REF);
+    float lumaSE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, TSMAA_LUMA_REF);
+    float lumaNE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, TSMAA_LUMA_REF);
+    float lumaSW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, TSMAA_LUMA_REF);
 
 	// These vals serve as caches, so they can be used later without having to redo them
 	// It's just an optimisation thing
@@ -700,8 +700,8 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float2 posN = posB - offNP;
     float2 posP = posB + offNP;
 
-	float lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, ESMAA_LUMA_REF);
-    float lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, ESMAA_LUMA_REF);
+	float lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, TSMAA_LUMA_REF);
+    float lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, TSMAA_LUMA_REF);
 	
     float gradientScaled = max(abs(gradientN), abs(gradientS)) * 0.25;
     bool lumaMLTZero = mad(0.5, -lumaNN, lumaM) < 0.0;
@@ -728,7 +728,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			{
 				posN -= offNP;
 				// lumaEndN = dotweightopt(mid, posN, useluma);
-				lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, ESMAA_LUMA_REF);
+				lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, TSMAA_LUMA_REF);
 				lumaEndN -= lumaNN;
 				doneN = abs(lumaEndN) >= gradientScaled;
 			}
@@ -736,7 +736,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			{
 				posP += offNP;
 				// lumaEndP = dotweightopt(mid, posP, useluma);
-				lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, ESMAA_LUMA_REF);
+				lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, TSMAA_LUMA_REF);
 				lumaEndP -= lumaNN;
 				doneP = abs(lumaEndP) >= gradientScaled;
 			}
