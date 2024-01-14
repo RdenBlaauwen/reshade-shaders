@@ -8,7 +8,7 @@
 // Robert den Blaauwen aka "RdenBlaauwen" (rdenblaauwen@gmail.com)
 /**
  * This code includes depth linearization functions adapted from DisplayDepth.fx,
- * written by CeeJay.dk.
+ * written by CeeJay.dk (with many updates and additions by the Reshade community).
  * https://github.com/crosire/reshade-shaders/blob/slim/Shaders/DisplayDepth.fx 
  */
 /*               TSMAA for ReShade 3.1.1+
@@ -289,7 +289,7 @@ namespace Lib
   }
 
   /**
-   * Custom implementations of any() that appear to run slightly faster than vanilla.
+   * Custom implementations of any() that appears to run slightly faster than vanilla.
    */
   bool any(float2 vec)
   {
@@ -332,7 +332,7 @@ namespace Lib
   /**
   * Turns a non-linear value into a linear value. Typically used to turn depth into linear depth.
   * 
-  * Borrowed from DisplayDepth.fx, by CeeJay.dk (with many updates and additions by the Reshade community).
+  * From DisplayDepth.fx, by CeeJay.dk (with many updates and additions by the Reshade community).
   *
   * @param float nonLinear non-linear value to be converted
   * @param bool logarithmic whether the input value is logarithmic

@@ -1,5 +1,6 @@
 
 /////////////////////////////////// CREDITS ///////////////////////////////////
+//TODO: consider adding explicit credits to EACH piece of code not made by me
 // This shader includes code adapted from existing shaders, 
 // which aren't made by RdenBlaauwen.
 // Do not distribute without giving credit to the original author(s).
@@ -291,6 +292,16 @@ uniform uint ESMAASmoothingMaxIterations <
 	ui_min = 5; ui_max = 20; ui_step = 1;
 > = 10;
 
+
+// depths greater than this are considered part of the background/skybox
+#define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
+#define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
+// weights for luma calculations
+#define ESMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722)
+
+/**
+ * SMAA preprocessor variables, from Lordbean's ASSMAA
+ */
 #ifdef SMAA_PRESET_CUSTOM
 	#define SMAA_THRESHOLD EdgeDetectionThreshold
 	#define SMAA_DEPTH_THRESHOLD DepthEdgeDetectionThreshold
@@ -314,16 +325,14 @@ uniform uint ESMAASmoothingMaxIterations <
 #define SMAA_BRANCH [branch]
 #define SMAA_FLATTEN [flatten]
 
-// depths greater than this are considered part of the background/skybox
-#define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
-#define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
-// weights for luma calculations
-#define SMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722)
-#define __TSMAA_EDGE_THRESHOLD (EdgeDetectionThreshold)
-
 #if (__RENDERER__ == 0xb000 || __RENDERER__ == 0xb100)
 	#define SMAAGather(tex, coord) tex2Dgather(tex, coord, 0)
 #endif
+
+/**
+ * Edge threshold pre-processor variable, from Lordbean's TSMAA
+ */
+#define __TSMAA_EDGE_THRESHOLD (EdgeDetectionThreshold)
 
 #include "SMAA.fxh"
 #include "ReShade.fxh"
@@ -433,6 +442,9 @@ float getBlendingStrength(float4 weightData, float weightAvg, float edgeAvg){
 
 //////////////////////////////// VERTEX SHADERS ////////////////////////////////
 
+/**
+ * From Lordbean's ASSMAA shader. 
+ */
 void SMAAEdgeDetectionWrapVS(
 	in uint id : SV_VertexID,
 	out float4 position : SV_Position,
@@ -442,6 +454,9 @@ void SMAAEdgeDetectionWrapVS(
 	PostProcessVS(id, position, texcoord);
 	SMAAEdgeDetectionVS(texcoord, offset);
 }
+/**
+ * From Lordbean's ASSMAA shader. 
+ */
 void SMAABlendingWeightCalculationWrapVS(
 	in uint id : SV_VertexID,
 	out float4 position : SV_Position,
@@ -452,6 +467,9 @@ void SMAABlendingWeightCalculationWrapVS(
 	PostProcessVS(id, position, texcoord);
 	SMAABlendingWeightCalculationVS(texcoord, pixcoord, offset);
 }
+/**
+ * From Lordbean's ASSMAA shader. 
+ */
 void SMAANeighborhoodBlendingWrapVS(
 	in uint id : SV_VertexID,
 	out float4 position : SV_Position,
@@ -463,7 +481,7 @@ void SMAANeighborhoodBlendingWrapVS(
 }
 
 /**
- * Taken from Lordbean's TSMAA shader. For more credits, see description above.
+ * From Lordbean's TSMAA shader. 
  */
 void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position : SV_Position, out float2 texcoord : TEXCOORD0, out float4 offset : TEXCOORD1)
 {
@@ -541,6 +559,9 @@ float2 ESMAAHybridEdgeDetectionPS(
 	return edges;
 }
 
+/**
+ * Adapted from Lordbean's ASSMAA shader. 
+ */
 float4 SMAABlendingWeightCalculationWrapPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
@@ -553,6 +574,9 @@ float4 SMAABlendingWeightCalculationWrapPS(
 	return SMAABlendingWeightCalculationPS(texcoord, pixcoord, offset, edgesSampler, areaSampler, searchSampler, 0.0);
 }
 
+/**
+ * Adapted from Lordbean's ASSMAA shader. 
+ */
 float3 SMAANeighborhoodBlendingWrapPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
@@ -594,6 +618,8 @@ float3 SMAANeighborhoodBlendingWrapPS(
  * Algorithm called 'smoothing', found in Lordbean's TSMAA. 
  * Appears to fix inconsistencies at edges by nudging pixel values towards values of nearby pixels.
  * A little gem that combines well with SMAA, but not very performant.
+ *
+ * Adapted from Lordbean's TSMAA shader. 
  */
 float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
  {
@@ -611,15 +637,15 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 mid = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
     float3 original = mid;
 	
-	float lumaM = dot(mid, SMAA_LUMA_REF);
+	float lumaM = dot(mid, ESMAA_LUMA_REF);
 	float chromaM = Lib::dotsat(mid, lumaM);
 	bool useluma = lumaM > chromaM;
 	if (!useluma) lumaM = 0.0;
 
-	float lumaS = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaN = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, SMAA_LUMA_REF);
+	float lumaS = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0, 1)).rgb, useluma, ESMAA_LUMA_REF);
+    float lumaE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 0)).rgb, useluma, ESMAA_LUMA_REF);
+    float lumaN = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 0,-1)).rgb, useluma, ESMAA_LUMA_REF);
+    float lumaW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb, useluma, ESMAA_LUMA_REF);
     
     float rangeMax = Lib::max(lumaS, lumaE, lumaN, lumaW, lumaM);
     float rangeMin = Lib::min(lumaS, lumaE, lumaN, lumaW, lumaM);
@@ -630,10 +656,10 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     bool earlyExit = (range < __TSMAA_EDGE_THRESHOLD);
 	if (earlyExit) return original;
 
-	float lumaNW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaSE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaNE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, SMAA_LUMA_REF);
-    float lumaSW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, SMAA_LUMA_REF);
+	float lumaNW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, ESMAA_LUMA_REF);
+    float lumaSE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, ESMAA_LUMA_REF);
+    float lumaNE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1,-1)).rgb, useluma, ESMAA_LUMA_REF);
+    float lumaSW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, ESMAA_LUMA_REF);
 
 	// These vals serve as caches, so they can be used later without having to redo them
 	// It's just an optimisation thing
@@ -674,8 +700,8 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float2 posN = posB - offNP;
     float2 posP = posB + offNP;
 
-	float lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
-    float lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
+	float lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, ESMAA_LUMA_REF);
+    float lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, ESMAA_LUMA_REF);
 	
     float gradientScaled = max(abs(gradientN), abs(gradientS)) * 0.25;
     bool lumaMLTZero = mad(0.5, -lumaNN, lumaM) < 0.0;
@@ -702,7 +728,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			{
 				posN -= offNP;
 				// lumaEndN = dotweightopt(mid, posN, useluma);
-				lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, SMAA_LUMA_REF);
+				lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, ESMAA_LUMA_REF);
 				lumaEndN -= lumaNN;
 				doneN = abs(lumaEndN) >= gradientScaled;
 			}
@@ -710,7 +736,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			{
 				posP += offNP;
 				// lumaEndP = dotweightopt(mid, posP, useluma);
-				lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, SMAA_LUMA_REF);
+				lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, ESMAA_LUMA_REF);
 				lumaEndP -= lumaNN;
 				doneP = abs(lumaEndP) >= gradientScaled;
 			}
@@ -771,8 +797,6 @@ float scaleSofteningStrength(float strength){
  * - added edge data to be considered as well
  * - Boosted the contribution that weight and edge data use to the final blending strength
  * - added several different, optional ways to determine blend strength from edge and weight data
- * 
- * For more credits, see description above.
  */
 float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
 {

@@ -100,7 +100,7 @@ namespace ESMAACore
     * Otherwise it continues to do the "edge prediction" as described above. 
     * 
     * Strange as it may sound, this is actually a highly modified version of Lordbean's image softening,
-    * adapted to use depth info instead. Works like a charm.
+    * taken from his TSMAA shader, adapted to use depth info instead. Works like a charm.
     * 
     * @param texcoord: float2 Coordinates of current texel, just like edge detection functions.
     * @param offset[3]: float4[3] Contains coordinates of 6 neighboring texels, equal to the ones used in edge detection functions.
@@ -285,7 +285,7 @@ namespace ESMAACore
         );
     }
     /**
-    * Luma Edge Detection taken and adapted from the official SMAA.fxh file, provided by the original team. (TODO: fix credits)
+    * Luma Edge Detection taken and adapted from the official SMAA.fxh file (see SMAA credits above).
     * Adapted to use adaptive thresholding. 
     * Does early return of edges instead of discarding, so that other detection methods can take over.
     *
@@ -392,7 +392,7 @@ namespace ESMAACore
     }
 
     /**
-    * Color Edge Detection taken and adapted from the official SMAA.fxh file, provided by the original team. (TODO: fix credits)
+    * Color Edge Detection taken and adapted from the official SMAA.fxh file (see SMAA credits above).
     * Adapted to use adaptive thresholding. 
     * Does early return of edges instead of discarding, so that other detection methods can take over.
     *
