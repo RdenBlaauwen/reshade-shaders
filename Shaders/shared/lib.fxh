@@ -1,6 +1,41 @@
 /**
 * Commonly used convenience functions. These need to be tested for performance.
 */
+
+/////////////////////////////////// CREDITS ///////////////////////////////////
+// Do not distribute without giving credit to the original author(s).
+// All original code not attributed to the below authors is made by
+// Robert den Blaauwen aka "RdenBlaauwen" (rdenblaauwen@gmail.com)
+/**
+ * This code includes depth linearization functions adapted from DisplayDepth.fx,
+ * written by CeeJay.dk.
+ * https://github.com/crosire/reshade-shaders/blob/slim/Shaders/DisplayDepth.fx 
+ */
+/*               TSMAA for ReShade 3.1.1+
+ *
+ *    (Temporal Subpixel Morphological Anti-Aliasing)
+ *
+ *
+ *     Experimental multi-frame SMAA implementation
+ *
+ *                     by lordbean
+ *
+ */
+/** 
+ * This shader contains components taken and/or adapted from Lordbean's TSMAA.
+ * https://github.com/lordbean-git/reshade-shaders/blob/main/Shaders/TSMAA.fx
+ * 
+ * All code attributed to "Lordbean" is copyright (c) Derek Brush (derekbrush@gmail.com)
+ */
+ /*------------------------------------------------------------------------------
+ * THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *-------------------------------------------------------------------------------*/
 namespace Lib
 {
   namespace Shared
@@ -19,6 +54,7 @@ namespace Lib
     }
   }
 
+  // TODO: try changing into pre-processor val
   static const float3 LUMA_WEIGHTS = float3(0.2126, 0.7152, 0.0722);
 
   float max(float a, float b,float c)
