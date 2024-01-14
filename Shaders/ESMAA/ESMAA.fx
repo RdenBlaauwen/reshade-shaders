@@ -213,6 +213,11 @@ uniform bool ESMAAEnableSoftening <
 	ui_label = "Enable softening";
 > = true;
 
+uniform bool EnableExperimentalSoftening <
+	ui_category = "Image Softening";
+	ui_label = "Use experimental softening";
+> = false;
+
 uniform bool ESMAADisableBackgroundSoftening <
 	ui_category = "Image Softening";
 	ui_label = "Skip background";
@@ -798,7 +803,7 @@ float scaleSofteningStrength(float strength){
  * - Boosted the contribution that weight and edge data use to the final blending strength
  * - added several different, optional ways to determine blend strength from edge and weight data
  */
-float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+float3 ESMAASofteningPSOld(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
 {
 	float3 a, b, c, d;
 	
@@ -887,6 +892,109 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	
 	return lerp(original, localavg, maxblending);
 }
+
+float3 ESMAASofteningPSNew(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+{
+	float3 a, b, c, d;
+	
+	// The way this data is collected is probably wrong, considering official SMAA code does it differently. 
+	// weightData for instance should be something like:
+	// float4 weightData = float4(
+	// 	SMAASampleLevelZero(blendSampler, offset.xy).a, // Right
+	// 	SMAASampleLevelZero(blendSampler, offset.zw).g, // Top
+	// 	SMAASampleLevelZero(blendSampler, texcoord).xz // Bottom / Left
+	// ); 
+	// but for some reason, the below implementation seems to yield better results as far as I can see.
+	// TODO: See if these two can be replaced with something that makes sense
+	float4 weightData = SMAASampleLevelZero(blendSampler, texcoord).xyzw;
+	float4 edgeData = float4(
+		SMAASampleLevelZero(edgesSampler, texcoord).rg,
+		SMAASampleLevelZero(edgesSampler, offset.xy).r, 
+		SMAASampleLevelZero(edgesSampler, offset.zw).g
+	); 
+
+	float maxWeight = Lib::max(weightData);
+	float signifEdges = Lib::sum(edgeData) + ESMAASofteningBaseStrength - 1.0;
+    bool noDelta = (maxWeight + signifEdges) == 0.0;
+
+	// If background softening is disabled, return early if 
+	// the pixel's depth corresponds with the background depth.
+	float depth = ReShade::GetLinearizedDepth(texcoord);
+	bool background = ESMAADisableBackgroundSoftening && depth > ESMAA_BACKGROUND_DEPTH_THRESHOLD;
+
+	bool earlyReturn = !ESMAAEnableSoftening || noDelta || background;
+	
+	// pattern:
+	//  e f g
+	//  h a b
+	//  i c d
+
+	#if __RENDERER__ >= 0xa000 // if DX10 or above
+		// get RGB values from the c, d, b, and a positions, in order.
+		float4 cdbared = tex2Dgather(ReShade::BackBuffer, texcoord, 0);
+		float4 cdbagreen = tex2Dgather(ReShade::BackBuffer, texcoord, 1);
+		float4 cdbablue = tex2Dgather(ReShade::BackBuffer, texcoord, 2);
+		a = float3(cdbared.w, cdbagreen.w, cdbablue.w);
+		float3 original = a;
+		if (earlyReturn) return original;
+		b = float3(cdbared.z, cdbagreen.z, cdbablue.z);
+		c = float3(cdbared.x, cdbagreen.x, cdbablue.x);
+		d = float3(cdbared.y, cdbagreen.y, cdbablue.y);
+	#else // if DX9
+		a = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
+		float3 original = a;
+		if (earlyReturn) return original;
+		b = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, 0)).rgb;
+		c = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(0, 1)).rgb;
+		d = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, 1)).rgb;
+	#endif
+	float3 e = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, -1)).rgb;
+	float3 f = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(0, -1)).rgb;
+	float3 g = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(1, -1)).rgb;
+	float3 h = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb;
+	float3 i = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb;
+	
+	// Various shapes that can be present
+	float3 x1 = (e + f + g) / 3.0;
+	float3 x2 = (h + a + b) / 3.0;
+	float3 x3 = (i + c + d) / 3.0;
+	float3 cap = (h + e + f + g + b) / 5.0;
+	float3 bucket = (h + i + c + d + b) / 5.0;
+	float3 xy1 = (e + a + d) / 3.0;
+	float3 xy2 = (i + a + g) / 3.0;
+	float3 diamond = (h + f + c + b) / 4.0;
+	float3 square = (e + g + i + d) / 4.0;
+	
+	// Get the most divergent shapes..
+	float3 highterm = Lib::max(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
+	float3 lowterm = Lib::min(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
+	// ...and subtract them from the average of all shapes
+	float3 localavg = ((a + x1 + x2 + x3 + xy1 + xy2 + diamond + square + cap + bucket) - (highterm + lowterm)) / 8.0;
+
+	float edgeMax = 4.0 + ESMAASofteningBaseStrength - 1.0;
+	float edgeAvg = signifEdges / edgeMax;
+
+	// float strength = (edgeAvg + maxWeight) / 2.0;
+	float strength = edgeAvg; 
+	// float strength = maxWeight;
+
+	// Calculate blend strength based on weight and edge data
+	float scaledStrength = scaleSofteningStrength(strength);
+	float maxblending = scaledStrength * ESMAASofteningStrength;
+	
+	return lerp(original, localavg, maxblending);
+}
+
+float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+{
+	if(EnableExperimentalSoftening){
+		return ESMAASofteningPSNew(vpos, texcoord, offset);
+	}
+	return ESMAASofteningPSOld(vpos, texcoord, offset);
+}
+
+
+
 
 // Rendering passes
 
