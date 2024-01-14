@@ -906,16 +906,31 @@ float3 ESMAASofteningPSNew(float4 vpos : SV_Position, float2 texcoord : TEXCOORD
 	// ); 
 	// but for some reason, the below implementation seems to yield better results as far as I can see.
 	// TODO: See if these two can be replaced with something that makes sense
-	float4 weightData = SMAASampleLevelZero(blendSampler, texcoord).xyzw;
-	float4 edgeData = float4(
-		SMAASampleLevelZero(edgesSampler, texcoord).rg,
-		SMAASampleLevelZero(edgesSampler, offset.xy).r, 
-		SMAASampleLevelZero(edgesSampler, offset.zw).g
-	); 
+	// float4 weightData = SMAASampleLevelZero(blendSampler, texcoord).xyzw;
+	float4 edgeData;
+	#if __RENDERER__ >= 0xa000 // if DX10 or above
+		// get RGB values from the c, d, b, and a positions, in order.
+		float4 edgescdbared = tex2Dgather(edgesSampler, texcoord, 0);
+		float4 edgescdbagreen = tex2Dgather(edgesSampler, texcoord, 1);
+		edgeData = float4(
+			edgescdbared.w,
+			edgescdbagreen.w,
+			edgescdbared.z,
+			edgescdbagreen.x
+		);
+	#else // if DX9
+		edgeData = float4(
+			SMAASampleLevelZero(edgesSampler, texcoord).rg,
+			SMAASampleLevelZero(edgesSampler, offset.xy).r, 
+			SMAASampleLevelZero(edgesSampler, offset.zw).g
+		); 
+	#endif
 
-	float maxWeight = Lib::max(weightData);
-	float signifEdges = Lib::sum(edgeData) + ESMAASofteningBaseStrength - 1.0;
-    bool noDelta = (maxWeight + signifEdges) == 0.0;
+	// float maxWeight = Lib::avg(weightData);
+	float signifEdges = Lib::sum(edgeData) - 1.0;
+    // bool noDelta = (maxWeight + signifEdges) == 0.0;
+    bool noDelta = signifEdges == 0.0;
+
 
 	// If background softening is disabled, return early if 
 	// the pixel's depth corresponds with the background depth.
@@ -971,12 +986,20 @@ float3 ESMAASofteningPSNew(float4 vpos : SV_Position, float2 texcoord : TEXCOORD
 	// ...and subtract them from the average of all shapes
 	float3 localavg = ((a + x1 + x2 + x3 + xy1 + xy2 + diamond + square + cap + bucket) - (highterm + lowterm)) / 8.0;
 
-	float edgeMax = 4.0 + ESMAASofteningBaseStrength - 1.0;
-	float edgeAvg = signifEdges / edgeMax;
-
 	// float strength = (edgeAvg + maxWeight) / 2.0;
-	float strength = edgeAvg; 
+	float strength = signifEdges / 3.0; 
 	// float strength = maxWeight;
+	// float strength = signifEdges * 0.33 * 0.5  + maxWeight * 0.5;
+
+	float corners = saturate(edgeData.r+edgeData.g-1.0)
+		+ saturate(edgeData.g+edgeData.b-1.0)
+		+ saturate(edgeData.b+edgeData.a-1.0)
+		+ saturate(edgeData.a+edgeData.r-1.0);
+	// Reduce strength for straight lines of 1 pixel thick and their endings, to preserve detail
+	strength *= (corners == 0.0 || corners == 2.0) ? 0.6 : 1.0;
+
+	// float strength = ((signifEdges/3.0)+saturate(corners) + maxWeight)/3.0;
+	// float strength = ((signifEdges/3.0)+ maxWeight)/2.0;
 
 	// Calculate blend strength based on weight and edge data
 	float scaledStrength = scaleSofteningStrength(strength);
@@ -992,8 +1015,6 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	}
 	return ESMAASofteningPSOld(vpos, texcoord, offset);
 }
-
-
 
 
 // Rendering passes
