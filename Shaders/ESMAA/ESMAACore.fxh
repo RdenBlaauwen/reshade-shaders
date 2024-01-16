@@ -519,5 +519,103 @@ namespace ESMAACore
 
         return edges;
     }
+
+    float2 EuclideanLumaDetection(
+      float2 texcoord,
+      float4 offset[3],
+      ESMAASampler2D(colorTex),
+      float baseThreshold,
+      float localContrastAdaptationFactor,
+      bool enableAdaptiveThreshold,
+      float threshScaleFloor,
+      float threshScaleFactor
+    ) {
+        const float3 weights = ESMAA_LUMA_REF; // TODO: consider turning into param
+        // Calculate color deltas:
+        float4 delta;
+        float3 C = ESMAASamplePoint(colorTex, texcoord).rgb;
+
+        float3 Cleft = ESMAASamplePoint(colorTex, offset[0].xy).rgb;
+        float3 t = abs(C - Cleft);
+        delta.x = dot(t, weights);
+
+        float3 Ctop  = ESMAASamplePoint(colorTex, offset[0].zw).rgb;
+        t = abs(C - Ctop);
+        delta.y = dot(t, weights);
+
+      // ADAPTIVE THRESHOLD START
+
+      float maxChroma;
+      float2 threshold = float2(baseThreshold, baseThreshold);
+      if(enableAdaptiveThreshold){
+        maxChroma = Lib::max(
+          Lib::max(C),
+          Lib::max(Cleft),
+          Lib::max(Ctop)
+        );
+        // scale maxChroma so that only dark places have a significantly lower threshold
+        threshold *= getThresholdScale(maxChroma, threshScaleFloor, threshScaleFactor);
+      }
+
+      // ADAPTIVE THRESHOLD END
+
+        // We do the usual threshold:
+        float2 edges = step(threshold, delta.xy);
+
+        // Early return if there is no edge:
+        if (!Lib::any(edges))
+            return edges;
+
+        // Calculate right and bottom deltas:
+        float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
+        t = abs(C - Cright);
+        delta.z = dot(t, weights);
+
+        float3 Cbottom  = ESMAASamplePoint(colorTex, offset[1].zw).rgb;
+        t = abs(C - Cbottom);
+        delta.w = dot(t, weights);
+
+        // Calculate the maximum delta in the direct neighborhood:
+        float2 maxDelta = max(delta.xy, delta.zw);
+
+        // Calculate left-left and top-top deltas:
+        float3 Cleftleft  = ESMAASamplePoint(colorTex, offset[2].xy).rgb;
+        t = abs(Cleft - Cleftleft);
+        delta.z = dot(t, weights);
+
+        float3 Ctoptop = ESMAASamplePoint(colorTex, offset[2].zw).rgb;
+        t = abs(Ctop - Ctoptop);
+        delta.w = dot(t, weights);
+
+        // Calculate the final maximum delta:
+        maxDelta = max(maxDelta.xy, delta.zw);
+        float finalDelta = max(maxDelta.x, maxDelta.y);
+
+      // ADAPTIVE THRESHOLD second threshold check
+
+      if(enableAdaptiveThreshold){
+        // take ALL greatest components into account this time
+        float finalMaxChroma = Lib::max(
+          maxChroma, 
+          Lib::max(Cright), 
+          Lib::max(Cbottom),
+          Lib::max(Cleftleft),
+          Lib::max(Ctoptop)
+        );
+        // scaled finalMaxChroma so that only dark places have a significantly lower threshold
+        // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
+        threshold = float2(baseThreshold, baseThreshold)
+          * getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
+        // edges = step(threshold, delta.xy);
+        edges = step(threshold, delta.xy);
+      }
+      
+      // ADAPTIVE THRESHOLD second threshold check END
+
+        // Local contrast adaptation:
+        edges.xy *= step(finalDelta, localContrastAdaptationFactor * delta.xy);
+
+        return edges;
+    }
   }
 }
