@@ -336,12 +336,15 @@ namespace ESMAACore
 
       // ADAPTIVE THRESHOLD START
       float maxLuma;
+      float minLuma;
       float2 threshold = float2(baseThreshold, baseThreshold);
       if(enableAdaptiveThreshold){
         // use biggest local luma as basis
         maxLuma = Lib::max(L, Lleft, Ltop);
+        minLuma = Lib::min(L, Lleft, Ltop);
+        float range = maxLuma - minLuma;
         // scaled maxLuma so that only dark places have a significantly lower threshold
-        threshold *= getThresholdScale(maxLuma, threshScaleFloor, threshScaleFactor);
+        threshold *= getThresholdScale(range, threshScaleFloor, threshScaleFactor);
       } 
       // ADAPTIVE THRESHOLD END
 
@@ -368,27 +371,27 @@ namespace ESMAACore
         delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
 
       // ADAPTIVE THRESHOLD second threshold check
-
       if(enableAdaptiveThreshold){
-        // get the greates from  ALL lumas this time
-        // float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
+        // get therange from  ALL lumas this time
         float finalMaxLuma = Lib::max(maxLuma, Lright, Lbottom, Lleftleft, Ltoptop);
+        float finalMinLuma = Lib::min(minLuma, Lright, Lbottom, Lleftleft, Ltoptop);
+        float finalRange = finalMaxLuma - finalMinLuma;
         // scaled maxLuma so that only dark places have a significantly lower threshold
-        threshold *= getThresholdScale(finalMaxLuma, threshScaleFloor, threshScaleFactor);
+        threshold = float2(baseThreshold,baseThreshold) 
+          * getThresholdScale(finalRange, threshScaleFloor, threshScaleFactor);
         // edges set to 1 if delta greater than thresholds, else set to 0
         edges = step(threshold, delta.xy);
       }
-
       // ADAPTIVE THRESHOLD second threshold check END
 
-        // Calculate the final maximum delta:
-        maxDelta = max(maxDelta.xy, delta.zw);
-        float finalDelta = max(maxDelta.x, maxDelta.y);
+      // Calculate the final maximum delta:
+      maxDelta = max(maxDelta.xy, delta.zw);
+      float finalDelta = max(maxDelta.x, maxDelta.y);
 
-        // Local contrast adaptation:
-        edges.xy *= step(finalDelta, localContrastAdaptationFactor * delta.xy);
+      // Local contrast adaptation:
+      edges.xy *= step(finalDelta, localContrastAdaptationFactor * delta.xy);
 
-        return edges;
+      return edges;
     }
 
     /**
