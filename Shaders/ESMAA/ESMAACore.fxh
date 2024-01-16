@@ -510,7 +510,8 @@ namespace ESMAACore
         );
         // scaled finalMaxChroma so that only dark places have a significantly lower threshold
         // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-        threshold *= getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
+        threshold = float2(baseThreshold, baseThreshold) 
+          * getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
         // edges = step(threshold, delta.xy);
         edges = step(threshold, delta.xy);
       }
