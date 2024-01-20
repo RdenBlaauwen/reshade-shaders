@@ -671,15 +671,15 @@ namespace ESMAACore
 
         float3 Cleft = ESMAASamplePoint(colorTex, offset[0].xy).rgb;
         float rangeLeft = Lib::max(Cleft) - Lib::min(Cleft);
-        float finalRangeLeft = max(midRange, rangeLeft);
+        float colorfullness = max(midRange, rangeLeft);
         float3 t = abs(C - Cleft);
-        delta.x = (finalRangeLeft * Lib::max(t)) + ((1.0 - finalRangeLeft) * dot(t, weights));
+        delta.x = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights)); // TODO: refactor to use luma function instead
 
         float3 Ctop  = ESMAASamplePoint(colorTex, offset[0].zw).rgb;
         float rangeTop = Lib::max(Ctop) - Lib::min(Ctop);
-        float finalRangeTop = max(midRange, rangeTop);
+        colorfullness = max(midRange, rangeTop);
         t = abs(C - Ctop);
-        delta.y = (finalRangeTop * Lib::max(t)) + ((1.0 - finalRangeTop) * dot(t, weights));
+        delta.y = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
 
       // ADAPTIVE THRESHOLD START
       float maxChroma;
@@ -707,14 +707,14 @@ namespace ESMAACore
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
         t = abs(C - Cright);
         float rangeRight = Lib::max(Cright) - Lib::min(Cright);
-        float finalRangeRight = max(midRange, rangeRight);
-        delta.z = (finalRangeRight * Lib::max(t)) + ((1.0 - finalRangeRight) * dot(t, weights));
+        colorfullness = max(midRange, rangeRight);
+        delta.z = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
 
         float3 Cbottom  = ESMAASamplePoint(colorTex, offset[1].zw).rgb;
         t = abs(C - Cbottom);
         float rangeBottom = Lib::max(Cright) - Lib::min(Cright);
-        float finalRangeBottom = max(midRange, rangeBottom);
-        delta.w = (finalRangeBottom * Lib::max(t)) + ((1.0 - finalRangeBottom) * dot(t, weights));
+        colorfullness = max(midRange, rangeBottom);
+        delta.w = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
 
         // Calculate the maximum delta in the direct neighborhood:
         float2 maxDelta = max(delta.xy, delta.zw);
@@ -723,14 +723,14 @@ namespace ESMAACore
         float3 Cleftleft  = ESMAASamplePoint(colorTex, offset[2].xy).rgb;
         t = abs(Cleft - Cleftleft);
         float rangeLeftLeft = Lib::max(Cright) - Lib::min(Cright);
-        float finalRangeLeftLeft = max(finalRangeLeft, rangeLeftLeft);
-        delta.z = (finalRangeLeftLeft * Lib::max(t)) + ((1.0 - finalRangeLeftLeft) * dot(t, weights));
+        colorfullness = max(rangeLeft, rangeLeftLeft);
+        delta.z = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
 
         float3 Ctoptop = ESMAASamplePoint(colorTex, offset[2].zw).rgb;
         t = abs(Ctop - Ctoptop);
         float rangeTopTop = Lib::max(Cright) - Lib::min(Cright);
-        float finalRangeTopTop = max(finalRangeTop, rangeTopTop);
-        delta.w = (finalRangeTopTop * Lib::max(t)) + ((1.0 - finalRangeTopTop) * dot(t, weights));
+        colorfullness = max(rangeTop, rangeTopTop);
+        delta.w = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
 
         // Calculate the final maximum delta:
         maxDelta = max(maxDelta.xy, delta.zw);
