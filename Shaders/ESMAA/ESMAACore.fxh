@@ -520,6 +520,39 @@ namespace ESMAACore
         return edges;
     }
 
+    /**
+      * A detection algorithm that compares the luma of the delta of colors to the threshold.
+      * Adapted from SMAA's Color edge detection algorithm. Uses adaptive thresholding. 
+      * Does early return of edges instead of discarding, so that other detection methods can take over.
+      *
+      * IMPORTANT NOTICE: Euclidian Luma edge detection requires gamma-corrected colors, and
+      * thus 'colorTex' should be a non-sRGB texture.
+      *
+      * @param texcoord: float2 Coordinates of current texel, represented by float values of 0.0 - 1.0.
+      * @param offset[3]: float[3] Coordinates of neighbours.
+      *   offset[0].xy: left neighbour.
+      *   offset[0].zw: top neighbour.
+      *   offset[1].xy: right neighbour.
+      *   offset[1].zw: bottom neighbour.
+      *   offset[2].xy: left neighbour twice removed.
+      *   offset[2].zw: left neighbour twice removed.
+      * @param ESMAASampler2D(colorTex) 2D sampler for gamma-corrected colors.
+      *   texture properties:
+      *     AddressU = Clamp; AddressV = Clamp;
+      *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
+      *     SRGBTexture = false;
+      * @param baseThreshold: float The threshold that any delta must cross before being considered an edge.
+      * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
+      * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
+      *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
+      * @param threshScaleFloor: float Lowest value that the threshold can be lowered to.
+      * @param threshScaleFactor: float Factor by which local max intensity is multiplied before clamping between 0.0 - 1.0
+      *   Values above 1.0 means threshold is lowered less, prevents dark areas from having ridiculously low thresholds.
+      * @return float2 Whether edges have been detected to left and top. 
+      *   0.0 means no edge detected, 1.0 means edge detected. Nothing in between.
+      *   x: Represents edge with left texel.
+      *   y: Represents edge with top texel.
+      */
     float2 EuclideanLumaDetection(
       float2 texcoord,
       float4 offset[3],
