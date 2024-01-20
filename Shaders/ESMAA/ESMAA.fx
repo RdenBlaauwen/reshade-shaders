@@ -146,6 +146,11 @@ uniform bool ESMAAEnableEuclideanLumaDetection <
 	ui_label = "EuclideanLumaDetection";
 > = false;
 
+uniform bool ESMAAEnableHydridDetection <
+	ui_category = "Edge Detection";
+	ui_label = "HydridDetection";
+> = false;
+
 uniform bool ESMAADepthPredicationAntiNeighbourCheck <
 	ui_category = "Edge Detection";
 	ui_label = "DepthPredicationAntiNeighbourCheck";
@@ -558,6 +563,19 @@ float2 ESMAAHybridEdgeDetectionPS(
 	}
 	if(ESMAAEnableEuclideanLumaDetection && !edgesFound){
 		edges = ESMAACore::EdgeDetection::EuclideanLumaDetection(
+			texcoord, 
+			offset, 
+			colorGammaSampler, 
+			SMAA_THRESHOLD, 
+			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
+			ESMAAEnableAdaptiveThreshold, 
+			ESMAAThresholdFloor, 
+			ESMAAThreshScaleFactor
+		);
+		edgesFound = Lib::any(edges);
+	}
+	if(ESMAAEnableHydridDetection && !edgesFound){
+		edges = ESMAACore::EdgeDetection::HybridDetection(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
