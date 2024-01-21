@@ -328,11 +328,10 @@ namespace ESMAACore
       float threshScaleFactor
     ) {
       // Calculate lumas:
-      float3 weights = ESMAA_LUMA_REF; // TODO: consider turning into param
-      float L = dot(ESMAASamplePoint(colorTex, texcoord).rgb, weights);
+      float L = Lib::luma(ESMAASamplePoint(colorTex, texcoord).rgb);
 
-      float Lleft = dot(ESMAASamplePoint(colorTex, offset[0].xy).rgb, weights);
-      float Ltop  = dot(ESMAASamplePoint(colorTex, offset[0].zw).rgb, weights);
+      float Lleft = Lib::luma(ESMAASamplePoint(colorTex, offset[0].xy).rgb);
+      float Ltop  = Lib::luma(ESMAASamplePoint(colorTex, offset[0].zw).rgb);
 
       // ADAPTIVE THRESHOLD START
       float maxLuma;
@@ -355,16 +354,16 @@ namespace ESMAACore
             return edges;
 
         // Calculate right and bottom deltas:
-        float Lright = dot(ESMAASamplePoint(colorTex, offset[1].xy).rgb, weights);
-        float Lbottom  = dot(ESMAASamplePoint(colorTex, offset[1].zw).rgb, weights);
+        float Lright = Lib::luma(ESMAASamplePoint(colorTex, offset[1].xy).rgb);
+        float Lbottom  = Lib::luma(ESMAASamplePoint(colorTex, offset[1].zw).rgb);
         delta.zw = abs(L - float2(Lright, Lbottom));
 
         // Calculate the maximum delta in the direct neighborhood:
         float2 maxDelta = max(delta.xy, delta.zw);
 
         // Calculate left-left and top-top deltas:
-        float Lleftleft = dot(ESMAASamplePoint(colorTex, offset[2].xy).rgb, weights);
-        float Ltoptop = dot(ESMAASamplePoint(colorTex, offset[2].zw).rgb, weights);
+        float Lleftleft = Lib::luma(ESMAASamplePoint(colorTex, offset[2].xy).rgb);
+        float Ltoptop = Lib::luma(ESMAASamplePoint(colorTex, offset[2].zw).rgb);
         delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
 
       // ADAPTIVE THRESHOLD second threshold check
@@ -563,18 +562,17 @@ namespace ESMAACore
       float threshScaleFloor,
       float threshScaleFactor
     ) {
-        const float3 weights = ESMAA_LUMA_REF; // TODO: consider turning into param
         // Calculate color deltas:
         float4 delta;
         float3 C = ESMAASamplePoint(colorTex, texcoord).rgb;
 
         float3 Cleft = ESMAASamplePoint(colorTex, offset[0].xy).rgb;
         float3 t = abs(C - Cleft);
-        delta.x = dot(t, weights);
+        delta.x = Lib::luma(t);
 
         float3 Ctop  = ESMAASamplePoint(colorTex, offset[0].zw).rgb;
         t = abs(C - Ctop);
-        delta.y = dot(t, weights);
+        delta.y = Lib::luma(t);
 
       // ADAPTIVE THRESHOLD START
 
@@ -602,11 +600,11 @@ namespace ESMAACore
         // Calculate right and bottom deltas:
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
         t = abs(C - Cright);
-        delta.z = dot(t, weights);
+        delta.z = Lib::luma(t);
 
         float3 Cbottom  = ESMAASamplePoint(colorTex, offset[1].zw).rgb;
         t = abs(C - Cbottom);
-        delta.w = dot(t, weights);
+        delta.w = Lib::luma(t);
 
         // Calculate the maximum delta in the direct neighborhood:
         float2 maxDelta = max(delta.xy, delta.zw);
@@ -614,11 +612,11 @@ namespace ESMAACore
         // Calculate left-left and top-top deltas:
         float3 Cleftleft  = ESMAASamplePoint(colorTex, offset[2].xy).rgb;
         t = abs(Cleft - Cleftleft);
-        delta.z = dot(t, weights);
+        delta.z = Lib::luma(t);
 
         float3 Ctoptop = ESMAASamplePoint(colorTex, offset[2].zw).rgb;
         t = abs(Ctop - Ctoptop);
-        delta.w = dot(t, weights);
+        delta.w = Lib::luma(t);
 
         // Calculate the final maximum delta:
         maxDelta = max(maxDelta.xy, delta.zw);
@@ -651,6 +649,41 @@ namespace ESMAACore
         return edges;
     }
 
+    /**
+      * A hybrid of euclidian luma detection and chroma detection. Calculates both euclidian luma and chroma
+      * and uses the colorfulness of pixels involved to scale the contribution of each measure. 
+      * More color = chroma has more weight.
+      * Adapted from SMAA's Color edge detection algorithm. Uses adaptive thresholding. 
+      * Does early return of edges instead of discarding, so that other detection methods can take over.
+      *
+      * IMPORTANT NOTICE: Euclidian Luma edge detection requires gamma-corrected colors, and
+      * thus 'colorTex' should be a non-sRGB texture.
+      *
+      * @param texcoord: float2 Coordinates of current texel, represented by float values of 0.0 - 1.0.
+      * @param offset[3]: float[3] Coordinates of neighbours.
+      *   offset[0].xy: left neighbour.
+      *   offset[0].zw: top neighbour.
+      *   offset[1].xy: right neighbour.
+      *   offset[1].zw: bottom neighbour.
+      *   offset[2].xy: left neighbour twice removed.
+      *   offset[2].zw: left neighbour twice removed.
+      * @param ESMAASampler2D(colorTex) 2D sampler for gamma-corrected colors.
+      *   texture properties:
+      *     AddressU = Clamp; AddressV = Clamp;
+      *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
+      *     SRGBTexture = false;
+      * @param baseThreshold: float The threshold that any delta must cross before being considered an edge.
+      * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
+      * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
+      *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
+      * @param threshScaleFloor: float Lowest value that the threshold can be lowered to.
+      * @param threshScaleFactor: float Factor by which local max intensity is multiplied before clamping between 0.0 - 1.0
+      *   Values above 1.0 means threshold is lowered less, prevents dark areas from having ridiculously low thresholds.
+      * @return float2 Whether edges have been detected to left and top. 
+      *   0.0 means no edge detected, 1.0 means edge detected. Nothing in between.
+      *   x: Represents edge with left texel.
+      *   y: Represents edge with top texel.
+      */
     float2 HybridDetection(
       float2 texcoord,
       float4 offset[3],
@@ -661,7 +694,6 @@ namespace ESMAACore
       float threshScaleFloor,
       float threshScaleFactor
     ) {
-        const float3 weights = ESMAA_LUMA_REF; // TODO: consider turning into param
         // Calculate color deltas:
         float4 delta;
         float4 colorRange;
@@ -673,13 +705,13 @@ namespace ESMAACore
         float rangeLeft = Lib::max(Cleft) - Lib::min(Cleft);
         float colorfullness = max(midRange, rangeLeft);
         float3 t = abs(C - Cleft);
-        delta.x = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights)); // TODO: refactor to use luma function instead
+        delta.x = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t)); // TODO: refactor to use luma function instead
 
         float3 Ctop  = ESMAASamplePoint(colorTex, offset[0].zw).rgb;
         float rangeTop = Lib::max(Ctop) - Lib::min(Ctop);
         colorfullness = max(midRange, rangeTop);
         t = abs(C - Ctop);
-        delta.y = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
+        delta.y = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
 
       // ADAPTIVE THRESHOLD START
       float maxChroma;
@@ -708,13 +740,13 @@ namespace ESMAACore
         t = abs(C - Cright);
         float rangeRight = Lib::max(Cright) - Lib::min(Cright);
         colorfullness = max(midRange, rangeRight);
-        delta.z = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
+        delta.z = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
 
         float3 Cbottom  = ESMAASamplePoint(colorTex, offset[1].zw).rgb;
         t = abs(C - Cbottom);
         float rangeBottom = Lib::max(Cright) - Lib::min(Cright);
         colorfullness = max(midRange, rangeBottom);
-        delta.w = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
+        delta.w = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
 
         // Calculate the maximum delta in the direct neighborhood:
         float2 maxDelta = max(delta.xy, delta.zw);
@@ -724,13 +756,13 @@ namespace ESMAACore
         t = abs(Cleft - Cleftleft);
         float rangeLeftLeft = Lib::max(Cright) - Lib::min(Cright);
         colorfullness = max(rangeLeft, rangeLeftLeft);
-        delta.z = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
+        delta.z = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
 
         float3 Ctoptop = ESMAASamplePoint(colorTex, offset[2].zw).rgb;
         t = abs(Ctop - Ctoptop);
         float rangeTopTop = Lib::max(Cright) - Lib::min(Cright);
         colorfullness = max(rangeTop, rangeTopTop);
-        delta.w = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * dot(t, weights));
+        delta.w = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
 
         // Calculate the final maximum delta:
         maxDelta = max(maxDelta.xy, delta.zw);
