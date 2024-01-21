@@ -321,7 +321,7 @@ namespace ESMAACore
       float2 texcoord,
       float4 offset[3],
       ESMAASampler2D(colorTex),
-      float baseThreshold,
+      float2 baseThreshold,
       float localContrastAdaptationFactor,
       bool enableAdaptiveThreshold,
       float threshScaleFloor,
@@ -335,7 +335,7 @@ namespace ESMAACore
 
       // ADAPTIVE THRESHOLD START
       float maxLuma;
-      float2 threshold = float2(baseThreshold, baseThreshold);
+      float2 threshold = baseThreshold;
       if(enableAdaptiveThreshold){
         // use biggest local luma as basis
         maxLuma = Lib::max(L, Lleft, Ltop);
@@ -373,7 +373,8 @@ namespace ESMAACore
         // float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
         float finalMaxLuma = Lib::max(maxLuma, Lright, Lbottom, Lleftleft, Ltoptop);
         // scaled maxLuma so that only dark places have a significantly lower threshold
-        threshold *= getThresholdScale(finalMaxLuma, threshScaleFloor, threshScaleFactor);
+        threshold = baseThreshold 
+          * getThresholdScale(finalMaxLuma, threshScaleFloor, threshScaleFactor);
         // edges set to 1 if delta greater than thresholds, else set to 0
         edges = step(threshold, delta.xy);
       }
@@ -427,7 +428,7 @@ namespace ESMAACore
       float2 texcoord,
       float4 offset[3],
       ESMAASampler2D(colorTex),
-      float baseThreshold,
+      float2 baseThreshold,
       float localContrastAdaptationFactor,
       bool enableAdaptiveThreshold,
       float threshScaleFloor,
@@ -448,7 +449,7 @@ namespace ESMAACore
       // ADAPTIVE THRESHOLD START
 
       float maxChroma;
-      float2 threshold = float2(baseThreshold, baseThreshold);
+      float2 threshold = baseThreshold;
       if(enableAdaptiveThreshold){
         maxChroma = Lib::max(
           Lib::max(C),
@@ -506,7 +507,8 @@ namespace ESMAACore
         );
         // scaled finalMaxChroma so that only dark places have a significantly lower threshold
         // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-        threshold *= getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
+        threshold = baseThreshold
+           * getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
         // edges = step(threshold, delta.xy);
         edges = step(threshold, delta.xy);
       }
@@ -556,7 +558,7 @@ namespace ESMAACore
       float2 texcoord,
       float4 offset[3],
       ESMAASampler2D(colorTex),
-      float baseThreshold,
+      float2 baseThreshold,
       float localContrastAdaptationFactor,
       bool enableAdaptiveThreshold,
       float threshScaleFloor,
@@ -577,7 +579,7 @@ namespace ESMAACore
       // ADAPTIVE THRESHOLD START
 
       float maxChroma;
-      float2 threshold = float2(baseThreshold, baseThreshold);
+      float2 threshold = baseThreshold;
       if(enableAdaptiveThreshold){
         maxChroma = Lib::max(
           Lib::max(C),
@@ -635,7 +637,7 @@ namespace ESMAACore
         );
         // scaled finalMaxChroma so that only dark places have a significantly lower threshold
         // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-        threshold = float2(baseThreshold, baseThreshold)
+        threshold = baseThreshold
           * getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
         // edges = step(threshold, delta.xy);
         edges = step(threshold, delta.xy);
@@ -688,7 +690,7 @@ namespace ESMAACore
       float2 texcoord,
       float4 offset[3],
       ESMAASampler2D(colorTex),
-      float baseThreshold,
+      float2 baseThreshold,
       float localContrastAdaptationFactor,
       bool enableAdaptiveThreshold,
       float threshScaleFloor,
@@ -715,7 +717,7 @@ namespace ESMAACore
 
       // ADAPTIVE THRESHOLD START
       float maxChroma;
-      float2 threshold = float2(baseThreshold, baseThreshold);
+      float2 threshold = baseThreshold;
       if(enableAdaptiveThreshold){
         maxChroma = Lib::max(
           Lib::max(C),
@@ -781,7 +783,7 @@ namespace ESMAACore
         );
         // scaled finalMaxChroma so that only dark places have a significantly lower threshold
         // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-        threshold = float2(baseThreshold, baseThreshold)
+        threshold = baseThreshold
           * getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
         // edges = step(threshold, delta.xy);
         edges = step(threshold, delta.xy);

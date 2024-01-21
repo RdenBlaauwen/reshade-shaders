@@ -126,30 +126,11 @@ uniform bool ESMAAEnableSMAABlending <
 				 "Turning this off won't affect other effects.";
 > = true;
 
-uniform bool ESMAAEnableLumaEdgeDetection <
+uniform int EdgeDetectionMethod < __UNIFORM_COMBO_INT1
 	ui_category = "Edge Detection";
-	ui_label = "EnableLumaEdgeDetection";
-> = false;
-
-uniform bool ESMAAEnableChromaEdgeDetection <
-	ui_category = "Edge Detection";
-	ui_label = "EnableChromaEdgeDetection";
-> = false;
-
-uniform bool ESMAAEnableDepthEdgeDetection <
-	ui_category = "Edge Detection";
-	ui_label = "EnableDepthEdgeDetection";
-> = false;
-
-uniform bool ESMAAEnableEuclideanLumaDetection <
-	ui_category = "Edge Detection";
-	ui_label = "EuclideanLumaDetection";
-> = false;
-
-uniform bool ESMAAEnableHydridDetection <
-	ui_category = "Edge Detection";
-	ui_label = "HydridDetection";
-> = false;
+	ui_items = "Luma\0Color\0Euclidian Luma\0Hyrid\0";
+	ui_label = "Edge detection method";
+> = 3;
 
 uniform bool ESMAADepthPredicationAntiNeighbourCheck <
 	ui_category = "Edge Detection";
@@ -503,96 +484,62 @@ void TSMAANeighborhoodBlendingVS(in uint id : SV_VertexID, out float4 position :
 	// offset.zw -> pixel to the bottom
 }
 
-//////////////////////////////// EDGE DETECTION FUNCTIONS ////////////////////////////////
-
-/**
- * Depth Edge Detection taken and adapted from the official SMAA.fxh file, provided by the original team. (TODO: fix credits)
- * Does not discard edges, so that other detection methods can take over if edges are 0 if needed.
- * Adapted to use ReShades own depth buffer, no texture needed.
- *
- * TODO: implement adaptive threshold that decreases threshold for closer depths
- */
-float2 ESMAADepthEdgeDetection(float2 texcoord, float4 offset[3]) 
-{
-	float P = ReShade::GetLinearizedDepth(texcoord);
-	float Pleft = ReShade::GetLinearizedDepth(offset[0].xy);
-	float Ptop  = ReShade::GetLinearizedDepth(offset[0].zw);
-	float3 neighbours = float3(P, Pleft, Ptop);
-
-	float2 depthDelta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
-	return step(SMAA_DEPTH_THRESHOLD, depthDelta);
-}
-
 //////////////////////////////// PIXEL SHADERS (WRAPPERS) ////////////////////////////////
 
 /**
  * Custom edge detection pass that uses one or more edge detection methods in succession
  */
-float2 ESMAAHybridEdgeDetectionPS(
+float2 EdgeDetectionWrapperPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
 	float4 offset[3] : TEXCOORD1) : SV_Target
 {
-	float2 edges;
-	bool edgesFound = false;
-	if(ESMAAEnableLumaEdgeDetection){
-		edges = ESMAACore::EdgeDetection::LumaDetection(
+	float2 baseThreshold = float2(SMAA_THRESHOLD,SMAA_THRESHOLD);
+	if(EdgeDetectionMethod == 0){
+		return ESMAACore::EdgeDetection::LumaDetection(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			SMAA_THRESHOLD, 
+			baseThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
 			ESMAAThreshScaleFactor
 		);
-		edgesFound = Lib::any(edges);
-	}
-	if(ESMAAEnableChromaEdgeDetection && !edgesFound){
-		edges = ESMAACore::EdgeDetection::ChromaDetection(
+	} else if(EdgeDetectionMethod == 1){
+		return ESMAACore::EdgeDetection::ChromaDetection(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			SMAA_THRESHOLD, 
+			baseThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
 			ESMAAThreshScaleFactor
 		);
-		edgesFound = Lib::any(edges);
-	}
-	if(ESMAAEnableEuclideanLumaDetection && !edgesFound){
-		edges = ESMAACore::EdgeDetection::EuclideanLumaDetection(
+	} else if(EdgeDetectionMethod == 2){
+		return ESMAACore::EdgeDetection::EuclideanLumaDetection(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			SMAA_THRESHOLD, 
+			baseThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
 			ESMAAThreshScaleFactor
 		);
-		edgesFound = Lib::any(edges);
 	}
-	if(ESMAAEnableHydridDetection && !edgesFound){
-		edges = ESMAACore::EdgeDetection::HybridDetection(
-			texcoord, 
-			offset, 
-			colorGammaSampler, 
-			SMAA_THRESHOLD, 
-			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
-			ESMAAEnableAdaptiveThreshold, 
-			ESMAAThresholdFloor, 
-			ESMAAThreshScaleFactor
-		);
-		edgesFound = Lib::any(edges);
-	}
-	if(ESMAAEnableDepthEdgeDetection && !edgesFound){
-		edges = ESMAADepthEdgeDetection(texcoord, offset);
-		edgesFound = Lib::any(edges);
-	}
-	// if(!edgesFound) discard;
-	return edges;
+	// if EdgeDetectionMethod == 4
+	return ESMAACore::EdgeDetection::HybridDetection(
+		texcoord, 
+		offset, 
+		colorGammaSampler, 
+		baseThreshold, 
+		SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
+		ESMAAEnableAdaptiveThreshold, 
+		ESMAAThresholdFloor, 
+		ESMAAThreshScaleFactor
+	);
 }
 
 /**
@@ -931,7 +878,7 @@ technique ESMAA
 	pass EdgeDetectionPass
 	{
 		VertexShader = SMAAEdgeDetectionWrapVS;
-		PixelShader = ESMAAHybridEdgeDetectionPS;
+		PixelShader = EdgeDetectionWrapperPS;
 		RenderTarget = edgesTex;
 		ClearRenderTargets = true;
 		StencilEnable = true;
