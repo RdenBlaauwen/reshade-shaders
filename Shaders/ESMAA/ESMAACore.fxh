@@ -284,39 +284,42 @@ namespace ESMAACore
         1.0
         );
     }
+
     /**
-    * Luma Edge Detection taken and adapted from the official SMAA.fxh file (see SMAA credits above).
-    * Adapted to use adaptive thresholding. 
-    * Does early return of edges instead of discarding, so that other detection methods can take over.
-    *
-    * IMPORTANT NOTICE: luma edge detection requires gamma-corrected colors, and
-    * thus 'colorTex' should be a non-sRGB texture.
-    *
-    * @param texcoord: float2 Coordinates of current texel, represented by float values of 0.0 - 1.0.
-    * @param offset[3]: float[3] Coordinates of neighbours.
-    *   offset[0].xy: left neighbour.
-    *   offset[0].zw: top neighbour.
-    *   offset[1].xy: right neighbour.
-    *   offset[1].zw: bottom neighbour.
-    *   offset[2].xy: left neighbour twice removed.
-    *   offset[2].zw: left neighbour twice removed.
-    * @param ESMAASampler2D(colorTex) 2D sampler for gamma-corrected colors.
-    *   texture properties:
-    *     AddressU = Clamp; AddressV = Clamp;
-	  *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
-	  *     SRGBTexture = false;
-    * @param baseThreshold: float The threshold that any delta must cross before being considered an edge.
-    * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
-    * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
-    *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
-    * @param threshScaleFloor: float Lowest value that the threshold can be lowered to.
-    * @param threshScaleFactor: float Factor by which local max intensity is multiplied before clamping between 0.0 - 1.0
-    *   Values above 1.0 means threshold is lowered less, prevents dark areas from having ridiculously low thresholds.
-    * @return float2 Whether edges have been detected to left and top. 
-    *   0.0 means no edge detected, 1.0 means edge detected. Nothing in between.
-    *   x: Represents edge with left texel.
-    *   y: Represents edge with top texel.
-    */
+     * Luma Edge Detection taken and adapted from the official SMAA.fxh file (see SMAA credits above).
+     * Adapted to use adaptive thresholding. 
+     * Does early return of edges instead of discarding, so that other detection methods can take over.
+     *
+     * IMPORTANT NOTICE: luma edge detection requires gamma-corrected colors, and
+     * thus 'colorTex' should be a non-sRGB texture.
+     *
+     * @param texcoord: float2 Coordinates of current texel, represented by float values of 0.0 - 1.0.
+     * @param offset[3]: float[3] Coordinates of neighbours.
+     *   offset[0].xy: left neighbour.
+     *   offset[0].zw: top neighbour.
+     *   offset[1].xy: right neighbour.
+     *   offset[1].zw: bottom neighbour.
+     *   offset[2].xy: left neighbour twice removed.
+     *   offset[2].zw: left neighbour twice removed.
+     * @param ESMAASampler2D(colorTex) 2D sampler for gamma-corrected colors.
+     *   texture properties:
+     *     AddressU = Clamp; AddressV = Clamp;
+	   *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
+	   *     SRGBTexture = false;
+     * @param baseThreshold: float2 The threshold that any delta must cross before being considered an edge.
+     *  x: threshold for left edge
+     *    y: threshold for top edge
+     * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
+     * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
+     *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
+     * @param threshScaleFloor: float Lowest value that the threshold can be lowered to.
+     * @param threshScaleFactor: float Factor by which local max intensity is multiplied before clamping between 0.0 - 1.0
+     *   Values above 1.0 means threshold is lowered less, prevents dark areas from having ridiculously low thresholds.
+     * @return float2 Whether edges have been detected to left and top. 
+     *   0.0 means no edge detected, 1.0 means edge detected. Nothing in between.
+     *   x: Represents edge with left texel.
+     *   y: Represents edge with top texel.
+     */
     float2 LumaDetection(
       float2 texcoord,
       float4 offset[3],
@@ -352,6 +355,9 @@ namespace ESMAACore
         // Early return if there is no edge:
         if (!Lib::any(edges))
             return edges;
+
+        // if (edges.x == -edges.y)
+        //     discard;
 
         // Calculate right and bottom deltas:
         float Lright = Lib::luma(ESMAASamplePoint(colorTex, offset[1].xy).rgb);
@@ -392,38 +398,40 @@ namespace ESMAACore
     }
 
     /**
-    * Color Edge Detection taken and adapted from the official SMAA.fxh file (see SMAA credits above).
-    * Adapted to use adaptive thresholding. 
-    * Does early return of edges instead of discarding, so that other detection methods can take over.
-    *
-    * IMPORTANT NOTICE: color edge detection requires gamma-corrected colors, and
-    * thus 'colorTex' should be a non-sRGB texture.
-    *
-    * @param texcoord: float2 Coordinates of current texel, represented by float values of 0.0 - 1.0.
-    * @param offset[3]: float[3] Coordinates of neighbours.
-    *   offset[0].xy: left neighbour.
-    *   offset[0].zw: top neighbour.
-    *   offset[1].xy: right neighbour.
-    *   offset[1].zw: bottom neighbour.
-    *   offset[2].xy: left neighbour twice removed.
-    *   offset[2].zw: left neighbour twice removed.
-    * @param ESMAASampler2D(colorTex) 2D sampler for gamma-corrected colors.
-    *   texture properties:
-    *     AddressU = Clamp; AddressV = Clamp;
-	  *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
-	  *     SRGBTexture = false;
-    * @param baseThreshold: float The threshold that any delta must cross before being considered an edge.
-    * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
-    * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
-    *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
-    * @param threshScaleFloor: float Lowest value that the threshold can be lowered to.
-    * @param threshScaleFactor: float Factor by which local max intensity is multiplied before clamping between 0.0 - 1.0
-    *   Values above 1.0 means threshold is lowered less, prevents dark areas from having ridiculously low thresholds.
-    * @return float2 Whether edges have been detected to left and top. 
-    *   0.0 means no edge detected, 1.0 means edge detected. Nothing in between.
-    *   x: Represents edge with left texel.
-    *   y: Represents edge with top texel.
-    */
+     * Color Edge Detection taken and adapted from the official SMAA.fxh file (see SMAA credits above).
+     * Adapted to use adaptive thresholding. 
+     * Does early return of edges instead of discarding, so that other detection methods can take over.
+     *
+     * IMPORTANT NOTICE: color edge detection requires gamma-corrected colors, and
+     * thus 'colorTex' should be a non-sRGB texture.
+     *
+     * @param texcoord: float2 Coordinates of current texel, represented by float values of 0.0 - 1.0.
+     * @param offset[3]: float[3] Coordinates of neighbours.
+     *   offset[0].xy: left neighbour.
+     *   offset[0].zw: top neighbour.
+     *   offset[1].xy: right neighbour.
+     *   offset[1].zw: bottom neighbour.
+     *   offset[2].xy: left neighbour twice removed.
+     *   offset[2].zw: left neighbour twice removed.
+     * @param ESMAASampler2D(colorTex) 2D sampler for gamma-corrected colors.
+     *   texture properties:
+     *     AddressU = Clamp; AddressV = Clamp;
+	   *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
+	   *     SRGBTexture = false;
+     * @param baseThreshold: float2 The threshold that any delta must cross before being considered an edge.
+     *  x: threshold for left edge
+     *    y: threshold for top edge
+     * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
+     * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
+     *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
+     * @param threshScaleFloor: float Lowest value that the threshold can be lowered to.
+     * @param threshScaleFactor: float Factor by which local max intensity is multiplied before clamping between 0.0 - 1.0
+     *   Values above 1.0 means threshold is lowered less, prevents dark areas from having ridiculously low thresholds.
+     * @return float2 Whether edges have been detected to left and top. 
+     *   0.0 means no edge detected, 1.0 means edge detected. Nothing in between.
+     *   x: Represents edge with left texel.
+     *   y: Represents edge with top texel.
+     */
     float2 ChromaDetection(
       float2 texcoord,
       float4 offset[3],
@@ -468,6 +476,9 @@ namespace ESMAACore
         // Early return if there is no edge:
         if (!Lib::any(edges))
             return edges;
+
+        // if (edges.x == -edges.y)
+        //     discard;
 
         // Calculate right and bottom deltas:
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
@@ -542,7 +553,9 @@ namespace ESMAACore
       *     AddressU = Clamp; AddressV = Clamp;
       *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
       *     SRGBTexture = false;
-      * @param baseThreshold: float The threshold that any delta must cross before being considered an edge.
+      * @param baseThreshold: float2 The threshold that any delta must cross before being considered an edge.
+      *   x: threshold for left edge
+      *   y: threshold for top edge
       * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
       * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
       *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
@@ -598,6 +611,9 @@ namespace ESMAACore
         // Early return if there is no edge:
         if (!Lib::any(edges))
             return edges;
+
+        // if (edges.x == -edges.y)
+        //     discard;
 
         // Calculate right and bottom deltas:
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
@@ -674,7 +690,9 @@ namespace ESMAACore
       *     AddressU = Clamp; AddressV = Clamp;
       *     MipFilter = Point; MinFilter = Linear; MagFilter = Linear;
       *     SRGBTexture = false;
-      * @param baseThreshold: float The threshold that any delta must cross before being considered an edge.
+      * @param baseThreshold: float2 The threshold that any delta must cross before being considered an edge.
+      *   x: threshold for left edge
+      *   y: threshold for top edge
       * @param localContrastAdaptationFactor: float See original SMAA shader for explanation.
       * @param enableAdaptiveThreshold: bool If true, edge detection lowers threshold based on the local max intensity.
       *   Compensates for fact that darker areas cannot have deltas as big as brighter areas.
@@ -705,15 +723,15 @@ namespace ESMAACore
 
         float3 Cleft = ESMAASamplePoint(colorTex, offset[0].xy).rgb;
         float rangeLeft = Lib::max(Cleft) - Lib::min(Cleft);
-        float colorfullness = max(midRange, rangeLeft);
+        float colorfulness = max(midRange, rangeLeft);
         float3 t = abs(C - Cleft);
-        delta.x = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t)); // TODO: refactor to use luma function instead
+        delta.x = (colorfulness * Lib::max(t)) + ((1.0 - colorfulness) * Lib::luma(t)); // TODO: refactor to use luma function instead
 
         float3 Ctop  = ESMAASamplePoint(colorTex, offset[0].zw).rgb;
         float rangeTop = Lib::max(Ctop) - Lib::min(Ctop);
-        colorfullness = max(midRange, rangeTop);
+        colorfulness = max(midRange, rangeTop);
         t = abs(C - Ctop);
-        delta.y = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
+        delta.y = (colorfulness * Lib::max(t)) + ((1.0 - colorfulness) * Lib::luma(t));
 
       // ADAPTIVE THRESHOLD START
       float maxChroma;
@@ -737,18 +755,21 @@ namespace ESMAACore
         if (!Lib::any(edges))
             return edges;
 
+        // if (edges.x == -edges.y)
+        //     discard;
+
         // Calculate right and bottom deltas:
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
         t = abs(C - Cright);
         float rangeRight = Lib::max(Cright) - Lib::min(Cright);
-        colorfullness = max(midRange, rangeRight);
-        delta.z = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
+        colorfulness = max(midRange, rangeRight);
+        delta.z = (colorfulness * Lib::max(t)) + ((1.0 - colorfulness) * Lib::luma(t));
 
         float3 Cbottom  = ESMAASamplePoint(colorTex, offset[1].zw).rgb;
         t = abs(C - Cbottom);
         float rangeBottom = Lib::max(Cright) - Lib::min(Cright);
-        colorfullness = max(midRange, rangeBottom);
-        delta.w = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
+        colorfulness = max(midRange, rangeBottom);
+        delta.w = (colorfulness * Lib::max(t)) + ((1.0 - colorfulness) * Lib::luma(t));
 
         // Calculate the maximum delta in the direct neighborhood:
         float2 maxDelta = max(delta.xy, delta.zw);
@@ -757,14 +778,14 @@ namespace ESMAACore
         float3 Cleftleft  = ESMAASamplePoint(colorTex, offset[2].xy).rgb;
         t = abs(Cleft - Cleftleft);
         float rangeLeftLeft = Lib::max(Cright) - Lib::min(Cright);
-        colorfullness = max(rangeLeft, rangeLeftLeft);
-        delta.z = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
+        colorfulness = max(rangeLeft, rangeLeftLeft);
+        delta.z = (colorfulness * Lib::max(t)) + ((1.0 - colorfulness) * Lib::luma(t));
 
         float3 Ctoptop = ESMAASamplePoint(colorTex, offset[2].zw).rgb;
         t = abs(Ctop - Ctoptop);
         float rangeTopTop = Lib::max(Cright) - Lib::min(Cright);
-        colorfullness = max(rangeTop, rangeTopTop);
-        delta.w = (colorfullness * Lib::max(t)) + ((1.0 - colorfullness) * Lib::luma(t));
+        colorfulness = max(rangeTop, rangeTopTop);
+        delta.w = (colorfulness * Lib::max(t)) + ((1.0 - colorfulness) * Lib::luma(t));
 
         // Calculate the final maximum delta:
         maxDelta = max(maxDelta.xy, delta.zw);
