@@ -354,7 +354,7 @@ namespace ESMAACore
 
         // Early return if there is no edge:
         if (!Lib::any(edges))
-            return edges;
+            discard;
 
         // if (edges.x == -edges.y)
         //     discard;
@@ -475,7 +475,7 @@ namespace ESMAACore
 
         // Early return if there is no edge:
         if (!Lib::any(edges))
-            return edges;
+            discard;
 
         // if (edges.x == -edges.y)
         //     discard;
@@ -610,7 +610,7 @@ namespace ESMAACore
 
         // Early return if there is no edge:
         if (!Lib::any(edges))
-            return edges;
+            discard;
 
         // if (edges.x == -edges.y)
         //     discard;
@@ -753,7 +753,7 @@ namespace ESMAACore
 
         // Early return if there is no edge:
         if (!Lib::any(edges))
-            return edges;
+            discard;
 
         // if (edges.x == -edges.y)
         //     discard;
