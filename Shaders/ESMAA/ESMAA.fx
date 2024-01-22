@@ -137,15 +137,15 @@ uniform float EdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Edge Detection Threshold";
 	ui_min = 0.020; ui_max = 0.075; ui_step = 0.001;
-> = 0.050;
+> = 0.035;
 
 // Threshold for detecting edges on surfaces. 
 // Typically higher to prevent false positives
 uniform float SurfaceEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "SUrface Edge Detection Threshold";
-	ui_min = 0.05; ui_max = 0.2; ui_step = 0.001;
-> = 0.150;
+	ui_min = 0.075; ui_max = 0.15; ui_step = 0.001;
+> = 0.11;
 
 uniform bool EnableDepthPredication <
 	ui_category = "Edge Detection";
@@ -155,32 +155,25 @@ uniform bool EnableDepthPredication <
 uniform float DepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Depth Edge Detection Threshold";
-	ui_min = 0.0001; ui_max = 0.10; ui_step = 0.0001;
+	ui_min = 0.01; ui_max = 0.05; ui_step = 0.001;
 	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
-> = 0.01;
+> = 0.02;
 
 uniform float DepthEdgeAvgDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "DepthEdgeAvgDetectionThresh";
-	ui_min = 0.1; ui_max = 10.0; ui_step = 0.1;
-> = 2.0;
-
-uniform float DepthAntiSymmetryThresh <
-	ui_category = "Edge Detection";
-	ui_type = "slider";
-	ui_label = "DepthAntiSymmetryThresh";
-	ui_min = 0.000000001; ui_max = 0.001; ui_step = 0.000000001;
-> = 0.0001;
+	ui_min = 0.1; ui_max = 2.0; ui_step = 0.1;
+> = 0.8;
 
 uniform bool ESMAADepthPredicationAntiNeighbourCheck <
 	ui_category = "Edge Detection";
 	ui_label = "DepthPredicationAntiNeighbourCheck";
 > = true;
 
-uniform bool ESMAADepthPredicationSymmetric <
-	ui_category = "Edge Detection";
-	ui_label = "DepthPredicationSymmetric";
-> = false;
+// uniform bool ESMAADepthPredicationSymmetric <
+// 	ui_category = "Edge Detection";
+// 	ui_label = "DepthPredicationSymmetric";
+// > = false;
 
 uniform float ContrastAdaptationFactor < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
@@ -516,18 +509,20 @@ float2 EdgeDetectionWrapperPS(
 			SMAA_DEPTH_THRESHOLD,
 			ESMAA_DEPTH_PREDICATION_THRESHOLD,
 			ESMAADepthPredicationAntiNeighbourCheck,
-			ESMAADepthPredicationSymmetric
+			false
 		);
 
 		// The higher the predication values (certainty), the closer to edgeThreshold 
 		// the final threshold should be
 		threshold = lerp(surfaceThreshold, edgeThreshold, predication);
-		// threshold = surfaceThreshold;
-
+		// threshold = float2(
+		// 	lerp(surfaceThreshold.x, edgeThreshold.x, predication.x),
+		// 	lerp(surfaceThreshold.y, edgeThreshold.y, predication.y)
+		// );
 	} else {
 		// if no depth predication, the threshold is just the edge threshold.
-		// threshold = edgeThreshold;
-		threshold = 0.075;
+		threshold = edgeThreshold;
+		// threshold = 0.075;
 	}
 
 
@@ -620,7 +615,7 @@ float3 SMAANeighborhoodBlendingWrapPS(
 			SMAA_DEPTH_THRESHOLD,
 			ESMAA_DEPTH_PREDICATION_THRESHOLD,
 			ESMAADepthPredicationAntiNeighbourCheck,
-			ESMAADepthPredicationSymmetric
+			false
 		);
 		return float3(depthEdges, 0.0);
 	}
