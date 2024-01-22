@@ -141,7 +141,7 @@ namespace ESMAACore
     {
       const float no = 0.0;
       const float insignifMaybe = 0.1;
-      const float signifMaybe = 0.7;
+      const float signifMaybe = 0.8;
       const float yes = 1.0;
       // pattern:
       //  e f g
@@ -221,6 +221,9 @@ namespace ESMAACore
         d = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, 1)).r;
       #endif
 
+      float i = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 1)).r;
+      float g = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, -1)).r;
+
       // TODO: consider only doing early return if all edges are negated by an opposing edge
       // rather than detection of any opposing edge.
       if(useOpposingEdgesCheck){
@@ -233,17 +236,18 @@ namespace ESMAACore
           return float2(no, no);
       }
 
-      // float x1 = (e + f + g) / 3.0;
-      // float x2 = (h + b) / 2.0;
-      // float x3 = (i + c + d) / 3.0;
-      float x1 = f;
+      float x1 = (e + f + g) / 3.0;
       float x2 = (h + b) / 2.0;
-      float x3 = c;
+      float x3 = (i + c + d) / 3.0;
+      // float x1 = f;
+      // float x2 = (h + b) / 2.0;
+      // float x3 = c;
 
-      // float xy1 = (e + d) / 2.0;
-      // float xy2 = (i + g) / 2.0;
+      float xy1 = (e + d) / 2.0;
+      float xy2 = (i + g) / 2.0;
 
-      float localAvg = (x1 + x2 + x3) / 3.0;
+      float localAvg = (x1 + x2 + x3 + xy1 + xy2) / 5.0;
+      // float localAvg = (x1 + x2 + x3) / 3.0;
 
       float localDelta = abs(a - localAvg);
 

@@ -136,7 +136,7 @@ uniform int EdgeDetectionMethod < __UNIFORM_COMBO_INT1
 uniform float EdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Edge Detection Threshold";
-	ui_min = 0.02; ui_max = 0.1; ui_step = 0.001;
+	ui_min = 0.020; ui_max = 0.075; ui_step = 0.001;
 > = 0.050;
 
 // Threshold for detecting edges on surfaces. 
@@ -519,7 +519,7 @@ float2 EdgeDetectionWrapperPS(
 		// Higher values = more confidence that an edge is there
 		float2 predication = ESMAACore::Predication::DepthEdgeEstimation(
 			texcoord, 
-			edgeOffset, 
+			offset, 
 			ReShade::DepthBuffer, 
 			SMAA_DEPTH_THRESHOLD,
 			ESMAA_DEPTH_PREDICATION_THRESHOLD,
@@ -529,10 +529,13 @@ float2 EdgeDetectionWrapperPS(
 
 		// The higher the predication values (certainty), the closer to edgeThreshold 
 		// the final threshold should be
-		float2 threshold = lerp(surfaceThreshold, edgeThreshold, predication);
+		threshold = lerp(surfaceThreshold, edgeThreshold, predication);
+		// threshold = surfaceThreshold;
+
 	} else {
 		// if no depth predication, the threshold is just the edge threshold.
-		threshold = edgeThreshold;
+		// threshold = edgeThreshold;
+		threshold = 0.075;
 	}
 
 
