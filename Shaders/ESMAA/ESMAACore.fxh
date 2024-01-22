@@ -356,9 +356,6 @@ namespace ESMAACore
         if (!Lib::any(edges))
             discard;
 
-        // if (edges.x == -edges.y)
-        //     discard;
-
         // Calculate right and bottom deltas:
         float Lright = Lib::luma(ESMAASamplePoint(colorTex, offset[1].xy).rgb);
         float Lbottom  = Lib::luma(ESMAASamplePoint(colorTex, offset[1].zw).rgb);
@@ -476,9 +473,6 @@ namespace ESMAACore
         // Early return if there is no edge:
         if (!Lib::any(edges))
             discard;
-
-        // if (edges.x == -edges.y)
-        //     discard;
 
         // Calculate right and bottom deltas:
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
@@ -611,9 +605,6 @@ namespace ESMAACore
         // Early return if there is no edge:
         if (!Lib::any(edges))
             discard;
-
-        // if (edges.x == -edges.y)
-        //     discard;
 
         // Calculate right and bottom deltas:
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
@@ -754,9 +745,6 @@ namespace ESMAACore
         // Early return if there is no edge:
         if (!Lib::any(edges))
             discard;
-
-        // if (edges.x == -edges.y)
-        //     discard;
 
         // Calculate right and bottom deltas:
         float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
