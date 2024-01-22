@@ -22,7 +22,7 @@ float maxComp(float3 rgb){
 	return max(rgb.r, max(rgb.g, rgb.b));
 }
 ```
-Wass actually SLOWER than:
+Was actually SLOWER than:
 ```
 float maxComp(float2 rg)
 {
@@ -34,3 +34,15 @@ return max(maxComp(rgb.rg), rgb.b);
 }
 ```
 I have no idea why.
+## Performance of corner count
+THis "optimized" corner counting code:
+```
+float corners = (edgeData.r + edgeData.b) * (edgeData.g + edgeData.a);
+```
+somehow didn't improve performance vs the naive approach, which is:
+```
+float corners = saturate(edgeData.r + edgeData.g - 1.0) 
+	+ saturate(edgeData.g + edgeData.b - 1.0) 
+	+ saturate(edgeData.b + edgeData.a - 1.0) 
+	+ saturate(edgeData.a + edgeData.r - 1.0);
+```
