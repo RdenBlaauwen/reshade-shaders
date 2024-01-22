@@ -132,21 +132,25 @@ uniform int EdgeDetectionMethod < __UNIFORM_COMBO_INT1
 	ui_label = "Edge detection method";
 > = 3;
 
-uniform bool ESMAADepthPredicationAntiNeighbourCheck <
-	ui_category = "Edge Detection";
-	ui_label = "DepthPredicationAntiNeighbourCheck";
-> = true;
-
-uniform bool ESMAADepthPredicationSymmetric <
-	ui_category = "Edge Detection";
-	ui_label = "DepthPredicationSymmetric";
-> = false;
-
+// Threshold for detecting edges around edges of geometric objects or even polygons
 uniform float EdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Edge Detection Threshold";
-	ui_min = 0.02; ui_max = 0.2; ui_step = 0.001;
-> = 0.075;
+	ui_min = 0.02; ui_max = 0.1; ui_step = 0.001;
+> = 0.050;
+
+// Threshold for detecting edges on surfaces. 
+// Typically higher to prevent false positives
+uniform float SurfaceEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
+	ui_category = "Edge Detection";
+	ui_label = "SUrface Edge Detection Threshold";
+	ui_min = 0.05; ui_max = 0.2; ui_step = 0.001;
+> = 0.150;
+
+uniform bool EnableDepthPredication <
+	ui_category = "Edge Detection";
+	ui_label = "EnableDepthPredication";
+> = true;
 
 uniform float DepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
@@ -167,6 +171,16 @@ uniform float DepthAntiSymmetryThresh <
 	ui_label = "DepthAntiSymmetryThresh";
 	ui_min = 0.000000001; ui_max = 0.001; ui_step = 0.000000001;
 > = 0.0001;
+
+uniform bool ESMAADepthPredicationAntiNeighbourCheck <
+	ui_category = "Edge Detection";
+	ui_label = "DepthPredicationAntiNeighbourCheck";
+> = true;
+
+uniform bool ESMAADepthPredicationSymmetric <
+	ui_category = "Edge Detection";
+	ui_label = "DepthPredicationSymmetric";
+> = false;
 
 uniform float ContrastAdaptationFactor < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
@@ -494,13 +508,40 @@ float2 EdgeDetectionWrapperPS(
 	float2 texcoord : TEXCOORD0,
 	float4 offset[3] : TEXCOORD1) : SV_Target
 {
-	float2 baseThreshold = float2(SMAA_THRESHOLD,SMAA_THRESHOLD);
+	// Threshold for detecting edges around edges of geometric objects or even polygons
+	const float2 edgeThreshold = float2(SMAA_THRESHOLD,SMAA_THRESHOLD);
+
+	float2 threshold;
+	if (EnableDepthPredication){
+		// Threshold for detecting edges on surfaces. Typically higher
+		const float2 surfaceThreshold = float2(SurfaceEdgeDetectionThreshold, SurfaceEdgeDetectionThreshold);
+
+		// Higher values = more confidence that an edge is there
+		float2 predication = ESMAACore::Predication::DepthEdgeEstimation(
+			texcoord, 
+			edgeOffset, 
+			ReShade::DepthBuffer, 
+			SMAA_DEPTH_THRESHOLD,
+			ESMAA_DEPTH_PREDICATION_THRESHOLD,
+			ESMAADepthPredicationAntiNeighbourCheck,
+			ESMAADepthPredicationSymmetric
+		);
+
+		// The higher the predication values (certainty), the closer to edgeThreshold 
+		// the final threshold should be
+		float2 threshold = lerp(surfaceThreshold, edgeThreshold, predication);
+	} else {
+		// if no depth predication, the threshold is just the edge threshold.
+		threshold = edgeThreshold;
+	}
+
+
 	if(EdgeDetectionMethod == 0){
 		return ESMAACore::EdgeDetection::LumaDetection(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			baseThreshold, 
+			threshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
@@ -511,7 +552,7 @@ float2 EdgeDetectionWrapperPS(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			baseThreshold, 
+			threshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
@@ -522,7 +563,7 @@ float2 EdgeDetectionWrapperPS(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			baseThreshold, 
+			threshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
@@ -534,7 +575,7 @@ float2 EdgeDetectionWrapperPS(
 		texcoord, 
 		offset, 
 		colorGammaSampler, 
-		baseThreshold, 
+		threshold, 
 		SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 		ESMAAEnableAdaptiveThreshold, 
 		ESMAAThresholdFloor, 

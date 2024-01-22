@@ -139,6 +139,10 @@ namespace ESMAACore
       bool compareLeftAndTopDeltaWithLocalAvg
       )
     {
+      const float no = 0.0;
+      const float insignifMaybe = 0.1;
+      const float signifMaybe = 0.7;
+      const float yes = 1.0;
       // pattern:
       //  e f g
       //  h a b
@@ -226,7 +230,7 @@ namespace ESMAACore
 
         // Early return if there is an edge:
         if (Lib::any(edges))
-          return float2(0.0, 0.0);
+          return float2(no, no);
       }
 
       // float x1 = (e + f + g) / 3.0;
@@ -258,9 +262,9 @@ namespace ESMAACore
         }
         // This is like saying "Maybe there's an edge here, maybe there isn't. 
         // Please keep an eye out for jaggies just in case.".
-        return float2(0.5, 0.5); 
+        return float2(signifMaybe, signifMaybe); 
       }
-      return float2(0.0, 0.0);
+      return float2(no, no);
     }
   }
 
