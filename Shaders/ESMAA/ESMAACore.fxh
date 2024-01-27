@@ -91,7 +91,7 @@ namespace ESMAACore
   namespace Predication
   {
 
-    float2 DepthEdgeEstimationSimple(
+    float2 FilteredDepthPredication(
       float2 texcoord, 
       float4 offset[3],
       ESMAASampler2D(depthSampler), 
@@ -101,10 +101,6 @@ namespace ESMAACore
       bool compareLeftAndTopDeltaWithLocalAvg
       )
     {
-      const float no = 0.0;
-      const float insignifMaybe = 0.1;
-      const float signifMaybe = 0.6;
-      const float yes = 1.0;
       // pattern:
       //  e f g
       //  h a b
@@ -127,7 +123,6 @@ namespace ESMAACore
         original = a;
       #endif
 
-
       float currDepth = Lib::linearizeDepth(a);
       float topDepth = Lib::linearizeDepth(f);
       float leftDepth = Lib::linearizeDepth(h);
@@ -141,13 +136,14 @@ namespace ESMAACore
       float3 neighbours = float3(currDepth, leftDepth, topDepth);
       float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
       float2 edges = step(detectionThreshold, delta);
-      bool anyEdges = Lib::any(edges);
 
-      if (!anyEdges)
-            return edges;
+      if (!Lib::any(edges)) return edges;
 
-      float factor = a + saturate(0.001 - a) * 2.0;
-      predictionThresh *= factor;
+      const float no = 0.0;
+      const float signifMaybe = 0.6;
+      const float yes = 1.0;
+
+      predictionThresh *= a + saturate(0.001 - a) * 2.0;
 
       float b,c,d;
       #if ESMAA_RENDERER >= ESMAA_RENDERER_D3D10 // if DX10 or above
@@ -171,9 +167,9 @@ namespace ESMAACore
       float i = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 1)).r;
       float g = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, -1)).r;
 
-      float x1 = (e + f + g) / 3.0;
+      float x1 = f;
+      float x3 = c;
       float x2 = (h + b) / 2.0;
-      float x3 = (i + c + d) / 3.0;
       float xy1 = (e + d) / 2.0;
       float xy2 = (i + g) / 2.0;
 
@@ -184,11 +180,12 @@ namespace ESMAACore
       float localDelta = abs(a - localAvg);
 
       if (localDelta > predictionThresh) {
-        // return max(edges, float2(signifMaybe, signifMaybe)); 
-        return edges;
+        return max(edges, float2(signifMaybe, signifMaybe)); 
+        // return edges;
       }
       return float2(no, no);
     }
+
     /**
     * This function is meant for edge predication. It detects geometric edges using depth-detection with high accuracy, but in a symmetric fashion.
     * Which means it detects pixels around both sides of edges. This ironically makes it pretty bad for real edge detecion,
@@ -228,7 +225,7 @@ namespace ESMAACore
     * a disconnect between geometric and visual data.
     * Warning: do NOT use this as a true edge-detection algo. It WILL lead to false positives and artifacts!
     */
-    float2 DepthEdgeEstimation(
+    float2 LocalAverageDepthPredication(
       float2 texcoord, 
       float4 offset[3],
       ESMAASampler2D(depthSampler), 
@@ -278,34 +275,10 @@ namespace ESMAACore
       float3 neighbours = float3(currDepth, leftDepth, topDepth);
       float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
       float2 edges = step(detectionThreshold, delta);
-      bool anyEdges = Lib::any(edges);
 
-      // bool surface = false;
-      // if(ESMAADepthDataSurfaceCheck && anyEdges > 0.0){
-      // 	float2 farDeltas;
-      // 	if(edges.r > 0.0){
-      // 		float hLeft = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-2, 0)).r;
-      // 		float leftLeftDepth = linearizeDepth(hLeft);
-      // 		farDeltas.r = abs(leftDepth - leftLeftDepth);
-      // 	}
-      // 	if(edges.g > 0.0){
-      // 		float fTop = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, -2)).r;
-      // 		float topTopDepth = linearizeDepth(fTop);
-      // 		farDeltas.g = abs(topDepth - topTopDepth);
-      // 	}
-      // 	float2 farEdges = step(detectionThreshold,farDeltas);
-      // 	surface = dot(farEdges, float2(1.0,1.0)) > 0.0;
-      // }
+      if (Lib::any(edges)) return edges;
 
-      // Early return if there is an edge:
-        // if (!surface && anyEdges > 0.0)
-        //     return edges;
-
-      if (anyEdges)
-            return edges;
-
-      float factor = a + saturate(0.001 - a) * 2.0;
-      predictionThresh *= factor;
+      predictionThresh *= a + saturate(0.001 - a) * 2.0;
 
       float b,c,d;
       #if ESMAA_RENDERER >= ESMAA_RENDERER_D3D10 // if DX10 or above
@@ -335,11 +308,6 @@ namespace ESMAACore
           return float2(no, no);
       }
 
-      // float x1 = f;
-      // float x2 = (h + b) / 2.0;
-      // float x3 = c;
-      // float localAvg = (x1 + x2 + x3) / 3.0;
-
       float x1 = (e + f + g) / 3.0;
       float x2 = (h + b) / 2.0;
       float x3 = (i + c + d) / 3.0;
@@ -355,18 +323,6 @@ namespace ESMAACore
       float localDelta = abs(a - localAvg);
 
       if (localDelta > predictionThresh) {
-        // TODO: Try using this to filter when opposing edges are greater than avg.
-        if(compareLeftAndTopDeltaWithLocalAvg){
-          // If delta between top, left and current is much greater than
-          // delta of localaverage, return 1.0 for each detected edge.
-          //TODO: Use log delta instead of linear delta,
-          // because this is an apples and oranges comparison.
-          float2 res = step(localDelta * 4.0, delta);
-          // TODO: Shouldn't this be >= 1.0?
-          if(Lib::sum(res) == 1.0){
-            return res;
-          }
-        }
         // This is like saying "Maybe there's an edge here, maybe there isn't. 
         // Please keep an eye out for jaggies just in case.".
         return float2(signifMaybe, signifMaybe); 

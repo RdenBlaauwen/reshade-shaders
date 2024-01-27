@@ -140,6 +140,24 @@ uniform float EdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_min = 0.050; ui_max = 0.15; ui_step = 0.001;
 > = 0.09;
 
+uniform float ContrastAdaptationFactor < __UNIFORM_DRAG_FLOAT1
+	ui_category = "Edge Detection";
+	ui_label = "Local Contrast Adaptation Factor";
+	ui_min = 1.5; ui_max = 4.0; ui_step = 0.1;
+	ui_tooltip = "High values increase anti-aliasing effect, but may increase artifacts.";
+> = 2.0;
+
+uniform int ESMAADivider1 <
+	ui_category = "Edge Detection";
+	ui_type = "radio";
+	ui_label = " ";
+>;
+
+uniform int DepthPredicationMethod < __UNIFORM_COMBO_INT1
+	ui_category = "Edge Detection";
+	ui_items = "None\0Filtered edges\0Local average\0";
+	ui_label = "DepthPredicationMethod";
+> = 2;
 
 // Threshold for detecting edges around edges of geometric objects or even polygons
 uniform float PredicationEdgeThreshold < __UNIFORM_DRAG_FLOAT1
@@ -148,30 +166,19 @@ uniform float PredicationEdgeThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_min = 0.020; ui_max = 0.050; ui_step = 0.001;
 > = 0.030;
 
-// uniform bool EnableDepthPredication <
-// 	ui_category = "Edge Detection";
-// 	ui_label = "EnableDepthPredication";
-// > = true;
-
-uniform int DepthPredicationMethod < __UNIFORM_COMBO_INT1
-	ui_category = "Edge Detection";
-	ui_items = "None\0Simple\0Complex\0";
-	ui_label = "DepthPredicationMethod";
-> = false;
-
 uniform float DepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
-	ui_label = "Depth Edge Detection Threshold";
+	ui_label = "Threshold for local avg";
 	ui_min = 0.01; ui_max = 0.05; ui_step = 0.001;
 	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
 > = 0.02;
 
 uniform float DepthEdgeDetectionThreshold2 < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
-	ui_label = "DepthEdgeDetectionThreshold2";
-	ui_min = 0.00001; ui_max = 0.01; ui_step = 0.00001;
+	ui_label = "Threshold for filtered edges";
+	ui_min = 0.00001; ui_max = 0.001; ui_step = 0.00001;
 	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
-> = 0.001;
+> = 0.00002;
 
 uniform float DepthEdgeAvgDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
@@ -179,22 +186,11 @@ uniform float DepthEdgeAvgDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_min = 0.1; ui_max = 2.0; ui_step = 0.1;
 > = 0.8;
 
-uniform bool ESMAADepthPredicationAntiNeighbourCheck <
+uniform int ESMAADivider2 <
 	ui_category = "Edge Detection";
-	ui_label = "DepthPredicationAntiNeighbourCheck";
-> = true;
-
-// uniform bool ESMAADepthPredicationSymmetric <
-// 	ui_category = "Edge Detection";
-// 	ui_label = "DepthPredicationSymmetric";
-// > = false;
-
-uniform float ContrastAdaptationFactor < __UNIFORM_DRAG_FLOAT1
-	ui_category = "Edge Detection";
-	ui_label = "Local Contrast Adaptation Factor";
-	ui_min = 1.5; ui_max = 4.0; ui_step = 0.1;
-	ui_tooltip = "High values increase anti-aliasing effect, but may increase artifacts.";
-> = 2.0;
+	ui_type = "radio";
+	ui_label = " ";
+>;
 
 uniform bool ESMAAEnableAdaptiveThreshold <
 	ui_category = "Edge Detection";
@@ -209,7 +205,7 @@ uniform float ESMAAThreshScaleFactor <
 	ui_label = "Threshold scaling factor";
 	ui_min = 0.8; ui_max = 3.0; ui_step = 0.1;
 	ui_tooltip = "Lower values detect more in darker areas, but may cause artifacts and blur.";
-> = 1.5;
+> = 2.0;
 
 uniform float ESMAAThresholdFloor <
 	ui_type = "slider";
@@ -254,7 +250,7 @@ uniform int ESMAAAnomalousPixelScaling < __UNIFORM_COMBO_INT1
 	ui_category = "Image Softening";
 > = 1;
 
-uniform int ESMAADivider <
+uniform int ESMAADivider3 <
 	ui_category = "Image Softening";
 	ui_type = "radio";
 	ui_label = " ";
@@ -517,24 +513,24 @@ float2 EdgeDetectionWrapperPS(
 		float2 predication;
 		if(DepthPredicationMethod == 1) {
 			// Higher values = more confidence that an edge is there
-			predication = ESMAACore::Predication::DepthEdgeEstimationSimple(
+			predication = ESMAACore::Predication::FilteredDepthPredication(
 				texcoord, 
 				offset, 
 				ReShade::DepthBuffer, 
 				DepthEdgeDetectionThreshold2,
 				ESMAA_DEPTH_PREDICATION_THRESHOLD,
-				ESMAADepthPredicationAntiNeighbourCheck,
+				false,
 				false
 			);
 		} else if(DepthPredicationMethod == 2) {
 			// Higher values = more confidence that an edge is there
-			predication = ESMAACore::Predication::DepthEdgeEstimation(
+			predication = ESMAACore::Predication::LocalAverageDepthPredication(
 				texcoord, 
 				offset, 
 				ReShade::DepthBuffer, 
 				SMAA_DEPTH_THRESHOLD,
 				ESMAA_DEPTH_PREDICATION_THRESHOLD,
-				ESMAADepthPredicationAntiNeighbourCheck,
+				false,
 				false
 			);
 		}
@@ -623,39 +619,39 @@ float3 SMAANeighborhoodBlendingWrapPS(
 	if (DebugOutput == 2)
 		return tex2D(blendSampler, texcoord).rgb;
 	if (DebugOutput == 3) {
-		// construct a custom set of offsets suitable for DepthEdgeEstimation(),
+		// construct a custom set of offsets suitable for LocalAverageDepthPredication(),
 		// because it usually needs the offsets generated by SMAAEdgeDetectionWrapVS
 		float4 edgeOffset[3];
 		edgeOffset[0] = float4(-offset.x,offset.y,offset.z,-offset.w);
 		edgeOffset[1] = float4(offset.x,offset.y,offset.z,offset.w);
 		edgeOffset[2] = float4(-offset.x*2.0,offset.y,offset.z,-offset.w*2.0);
 
-		float2 depthEdges = ESMAACore::Predication::DepthEdgeEstimation(
+		float2 depthEdges = ESMAACore::Predication::LocalAverageDepthPredication(
 			texcoord, 
 			edgeOffset, 
 			ReShade::DepthBuffer, 
 			SMAA_DEPTH_THRESHOLD,
 			ESMAA_DEPTH_PREDICATION_THRESHOLD,
-			ESMAADepthPredicationAntiNeighbourCheck,
+			false,
 			false
 		);
 		return float3(depthEdges, 0.0);
 	}
 	if (DebugOutput == 4) {
-		// construct a custom set of offsets suitable for DepthEdgeEstimation(),
+		// construct a custom set of offsets suitable for LocalAverageDepthPredication(),
 		// because it usually needs the offsets generated by SMAAEdgeDetectionWrapVS
 		float4 edgeOffset[3];
 		edgeOffset[0] = float4(-offset.x,offset.y,offset.z,-offset.w);
 		edgeOffset[1] = float4(offset.x,offset.y,offset.z,offset.w);
 		edgeOffset[2] = float4(-offset.x*2.0,offset.y,offset.z,-offset.w*2.0);
 
-		float2 depthEdges = ESMAACore::Predication::DepthEdgeEstimationSimple(
+		float2 depthEdges = ESMAACore::Predication::FilteredDepthPredication(
 			texcoord, 
 			edgeOffset, 
 			ReShade::DepthBuffer, 
 			DepthEdgeDetectionThreshold2,
 			ESMAA_DEPTH_PREDICATION_THRESHOLD,
-			ESMAADepthPredicationAntiNeighbourCheck,
+			false,
 			false
 		);
 		return float3(depthEdges, 0.0);
