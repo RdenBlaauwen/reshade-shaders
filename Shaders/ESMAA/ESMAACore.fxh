@@ -90,6 +90,105 @@ namespace ESMAACore
 {
   namespace Predication
   {
+
+    float2 DepthEdgeEstimationSimple(
+      float2 texcoord, 
+      float4 offset[3],
+      ESMAASampler2D(depthSampler), 
+      float detectionThresh,
+      float predictionThresh,
+      bool useOpposingEdgesCheck,
+      bool compareLeftAndTopDeltaWithLocalAvg
+      )
+    {
+      const float no = 0.0;
+      const float insignifMaybe = 0.1;
+      const float signifMaybe = 0.6;
+      const float yes = 1.0;
+      // pattern:
+      //  e f g
+      //  h a b
+      //  i c d
+      float e,f,h,a, original;
+
+      #if ESMAA_RENDERER >= ESMAA_RENDERER_D3D10 // if DX10 or above
+        // get RGB values from the c, d, b, and a positions, in order.
+        float4 hafe = ESMAAGatherRedOffset(depthSampler, texcoord, int2(-1, -1));
+        e = hafe.w;
+        f = hafe.z;
+        h = hafe.x;
+        a = hafe.y;
+        original = a;
+      #else // if DX9
+        e = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, -1)).r;
+        f = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, -1)).r;
+        h = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 0)).r;
+        a = SMAASampleLevelZero(depthSampler, texcoord).r;
+        original = a;
+      #endif
+
+
+      float currDepth = Lib::linearizeDepth(a);
+      float topDepth = Lib::linearizeDepth(f);
+      float leftDepth = Lib::linearizeDepth(h);
+
+      // Scale so that the treshold is lower closeup, higher at medium distances, and much lower far away.
+      // TODO: refactor, isolate into separate function.
+      // TODO: See if replacing by lookup table improves performance.
+      float depthScaling = (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
+      float detectionThreshold = detectionThresh * depthScaling;
+
+      float3 neighbours = float3(currDepth, leftDepth, topDepth);
+      float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
+      float2 edges = step(detectionThreshold, delta);
+      bool anyEdges = Lib::any(edges);
+
+      if (!anyEdges)
+            return edges;
+
+      float factor = a + saturate(0.001 - a) * 2.0;
+      predictionThresh *= factor;
+
+      float b,c,d;
+      #if ESMAA_RENDERER >= ESMAA_RENDERER_D3D10 // if DX10 or above
+        // get RGB values from the c, d, b, and a positions, in order.
+        float4 cdba = ESMAAGatherRed(depthSampler, texcoord);
+        b = cdba.z;
+        c = cdba.x;
+        d = cdba.y;
+      #else // if DX9
+        b = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, 0)).r;
+        c = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, 1)).r;
+        d = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, 1)).r;
+      #endif
+
+      // float x1 = f;
+      // float x2 = (h + b) / 2.0;
+      // float x3 = c;
+
+      // float localAvg = (x1 + x2 + x3) / 3.0;
+
+      float i = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 1)).r;
+      float g = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, -1)).r;
+
+      float x1 = (e + f + g) / 3.0;
+      float x2 = (h + b) / 2.0;
+      float x3 = (i + c + d) / 3.0;
+      float xy1 = (e + d) / 2.0;
+      float xy2 = (i + g) / 2.0;
+
+      float lMin = Lib::min(x1, x2, x3, xy1, xy2);
+      float lMax = Lib::max(x1, x2, x3, xy1, xy2);
+      float localAvg = (x1 + x2 + x3 + xy1 + xy2 - lMin - lMax) / 3.0;
+
+      float localDelta = abs(a - localAvg);
+
+      if (localDelta > predictionThresh) {
+        // return max(edges, float2(signifMaybe, signifMaybe)); 
+        return edges;
+      }
+      return float2(no, no);
+    }
     /**
     * This function is meant for edge predication. It detects geometric edges using depth-detection with high accuracy, but in a symmetric fashion.
     * Which means it detects pixels around both sides of edges. This ironically makes it pretty bad for real edge detecion,
@@ -236,18 +335,22 @@ namespace ESMAACore
           return float2(no, no);
       }
 
-      float x1 = (e + f + g) / 3.0;
-      float x2 = (h + b) / 2.0;
-      float x3 = (i + c + d) / 3.0;
       // float x1 = f;
       // float x2 = (h + b) / 2.0;
       // float x3 = c;
+      // float localAvg = (x1 + x2 + x3) / 3.0;
+
+      float x1 = (e + f + g) / 3.0;
+      float x2 = (h + b) / 2.0;
+      float x3 = (i + c + d) / 3.0;
 
       float xy1 = (e + d) / 2.0;
       float xy2 = (i + g) / 2.0;
 
-      float localAvg = (x1 + x2 + x3 + xy1 + xy2) / 5.0;
-      // float localAvg = (x1 + x2 + x3) / 3.0;
+      float lMin = Lib::min(x1, x2, x3, xy1, xy2);
+      float lMax = Lib::max(x1, x2, x3, xy1, xy2);
+
+      float localAvg = (x1 + x2 + x3 + xy1 + xy2 - lMin - lMax) / 3.0;
 
       float localDelta = abs(a - localAvg);
 

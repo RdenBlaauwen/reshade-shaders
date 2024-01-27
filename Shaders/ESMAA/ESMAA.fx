@@ -111,7 +111,7 @@ uniform int CornerRounding < __UNIFORM_SLIDER_INT1
 > = 10;
 
 uniform int DebugOutput < __UNIFORM_COMBO_INT1
-	ui_items = "None\0View edges\0View weights\0Depth Edge estimation\0";
+	ui_items = "None\0View edges\0View weights\0Depth Edge estimation\0 Simple Depth Edge estimation\0";
 	ui_label = "Debug Output";
 > = false;
 
@@ -132,25 +132,32 @@ uniform int EdgeDetectionMethod < __UNIFORM_COMBO_INT1
 	ui_label = "Edge detection method";
 > = 3;
 
-// Threshold for detecting edges around edges of geometric objects or even polygons
-uniform float EdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
-	ui_category = "Edge Detection";
-	ui_label = "Edge Detection Threshold";
-	ui_min = 0.020; ui_max = 0.075; ui_step = 0.001;
-> = 0.035;
-
 // Threshold for detecting edges on surfaces. 
 // Typically higher to prevent false positives
-uniform float SurfaceEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
+uniform float EdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
-	ui_label = "SUrface Edge Detection Threshold";
-	ui_min = 0.075; ui_max = 0.15; ui_step = 0.001;
-> = 0.11;
+	ui_label = "Edge Threshold";
+	ui_min = 0.050; ui_max = 0.15; ui_step = 0.001;
+> = 0.09;
 
-uniform bool EnableDepthPredication <
+
+// Threshold for detecting edges around edges of geometric objects or even polygons
+uniform float PredicationEdgeThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
-	ui_label = "EnableDepthPredication";
-> = true;
+	ui_label = "Predication Edge Threshold";
+	ui_min = 0.020; ui_max = 0.050; ui_step = 0.001;
+> = 0.030;
+
+// uniform bool EnableDepthPredication <
+// 	ui_category = "Edge Detection";
+// 	ui_label = "EnableDepthPredication";
+// > = true;
+
+uniform int DepthPredicationMethod < __UNIFORM_COMBO_INT1
+	ui_category = "Edge Detection";
+	ui_items = "None\0Simple\0Complex\0";
+	ui_label = "DepthPredicationMethod";
+> = false;
 
 uniform float DepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
@@ -158,6 +165,13 @@ uniform float DepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_min = 0.01; ui_max = 0.05; ui_step = 0.001;
 	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
 > = 0.02;
+
+uniform float DepthEdgeDetectionThreshold2 < __UNIFORM_DRAG_FLOAT1
+	ui_category = "Edge Detection";
+	ui_label = "DepthEdgeDetectionThreshold2";
+	ui_min = 0.00001; ui_max = 0.01; ui_step = 0.00001;
+	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
+> = 0.001;
 
 uniform float DepthEdgeAvgDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
@@ -322,7 +336,7 @@ uniform uint ESMAASmoothingMaxIterations <
 /**
  * Edge threshold pre-processor variable, from Lordbean's TSMAA
  */
-#define __TSMAA_EDGE_THRESHOLD (EdgeDetectionThreshold)
+#define __TSMAA_EDGE_THRESHOLD (PredicationEdgeThreshold)
 
 #include "SMAA.fxh"
 #include "ReShade.fxh"
@@ -492,33 +506,40 @@ float2 EdgeDetectionWrapperPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
 	float4 offset[3] : TEXCOORD1) : SV_Target
-{
-	// Threshold for detecting edges around edges of geometric objects or even polygons
 	const float2 edgeThreshold = float2(SMAA_THRESHOLD,SMAA_THRESHOLD);
 
 	float2 threshold;
-	if (EnableDepthPredication){
-		// Threshold for detecting edges on surfaces. Typically higher
-		const float2 surfaceThreshold = float2(SurfaceEdgeDetectionThreshold, SurfaceEdgeDetectionThreshold);
+	if (DepthPredicationMethod > 0){
+		// Threshold for geometric edges
+		const float2 predicationThreshold = float2(PredicationEdgeThreshold, PredicationEdgeThreshold);
 
-		// Higher values = more confidence that an edge is there
-		float2 predication = ESMAACore::Predication::DepthEdgeEstimation(
-			texcoord, 
-			offset, 
-			ReShade::DepthBuffer, 
-			SMAA_DEPTH_THRESHOLD,
-			ESMAA_DEPTH_PREDICATION_THRESHOLD,
-			ESMAADepthPredicationAntiNeighbourCheck,
-			false
-		);
+		float2 predication;
+		if(DepthPredicationMethod == 1) {
+			// Higher values = more confidence that an edge is there
+			predication = ESMAACore::Predication::DepthEdgeEstimationSimple(
+				texcoord, 
+				offset, 
+				ReShade::DepthBuffer, 
+				DepthEdgeDetectionThreshold2,
+				ESMAA_DEPTH_PREDICATION_THRESHOLD,
+				ESMAADepthPredicationAntiNeighbourCheck,
+				false
+			);
+		} else if(DepthPredicationMethod == 2) {
+			// Higher values = more confidence that an edge is there
+			predication = ESMAACore::Predication::DepthEdgeEstimation(
+				texcoord, 
+				offset, 
+				ReShade::DepthBuffer, 
+				SMAA_DEPTH_THRESHOLD,
+				ESMAA_DEPTH_PREDICATION_THRESHOLD,
+				ESMAADepthPredicationAntiNeighbourCheck,
+				false
+			);
+		}
 
-		// The higher the predication values (certainty), the closer to edgeThreshold 
-		// the final threshold should be
-		threshold = lerp(surfaceThreshold, edgeThreshold, predication);
-		// threshold = float2(
-		// 	lerp(surfaceThreshold.x, edgeThreshold.x, predication.x),
-		// 	lerp(surfaceThreshold.y, edgeThreshold.y, predication.y)
-		// );
+		// The higher the predication values (certainty), the closer to predicationThreshold 
+		threshold = lerp(edgeThreshold, predicationThreshold, Lib::max(predication));
 	} else {
 		// if no depth predication, the threshold is just the edge threshold.
 		threshold = edgeThreshold;
@@ -613,6 +634,25 @@ float3 SMAANeighborhoodBlendingWrapPS(
 			edgeOffset, 
 			ReShade::DepthBuffer, 
 			SMAA_DEPTH_THRESHOLD,
+			ESMAA_DEPTH_PREDICATION_THRESHOLD,
+			ESMAADepthPredicationAntiNeighbourCheck,
+			false
+		);
+		return float3(depthEdges, 0.0);
+	}
+	if (DebugOutput == 4) {
+		// construct a custom set of offsets suitable for DepthEdgeEstimation(),
+		// because it usually needs the offsets generated by SMAAEdgeDetectionWrapVS
+		float4 edgeOffset[3];
+		edgeOffset[0] = float4(-offset.x,offset.y,offset.z,-offset.w);
+		edgeOffset[1] = float4(offset.x,offset.y,offset.z,offset.w);
+		edgeOffset[2] = float4(-offset.x*2.0,offset.y,offset.z,-offset.w*2.0);
+
+		float2 depthEdges = ESMAACore::Predication::DepthEdgeEstimationSimple(
+			texcoord, 
+			edgeOffset, 
+			ReShade::DepthBuffer, 
+			DepthEdgeDetectionThreshold2,
 			ESMAA_DEPTH_PREDICATION_THRESHOLD,
 			ESMAADepthPredicationAntiNeighbourCheck,
 			false
