@@ -506,6 +506,7 @@ float2 EdgeDetectionWrapperPS(
 	float4 position : SV_Position,
 	float2 texcoord : TEXCOORD0,
 	float4 offset[3] : TEXCOORD1) : SV_Target
+{
 	const float2 edgeThreshold = float2(SMAA_THRESHOLD,SMAA_THRESHOLD);
 
 	float2 threshold;
