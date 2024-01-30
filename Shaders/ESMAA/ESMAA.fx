@@ -270,19 +270,26 @@ uniform bool ESMAAEnableSmoothing <
 	ui_label = "Enable 'smoothing' AA";
 > = true;
 
-uniform float ESMAASmoothingMinStrength <
-	ui_type = "slider";
+uniform float SmoothingThreshold <
 	ui_category = "Smoothing";
-	ui_label = "Minimum smoothing strength";
+	ui_type = "slider";
+	ui_min = 0.01; ui_max = 0.15; ui_step = 0.001;
+	ui_label = "Threshold";
+> = 0.05;
+
+uniform float EdgeThresholdModifier <
+	ui_category = "Smoothing";
+	ui_type = "slider";
 	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
-> = 0.0;
+	ui_label = "Edge thresh mod";
+> = 0.35;
 
 // creates max value for the `maxblending` var
 uniform float ESMAASmoothingStrengthMod <
 	ui_type = "slider";
 	ui_category = "Smoothing";
 	ui_label = "Strength modifier";
-	ui_min = 0.0; ui_max = 1.25; ui_step = 0.01;
+	ui_min = 0.0; ui_max = 2.0; ui_step = 0.01;
 > = 1.0;
 
 uniform uint ESMAASmoothingMaxIterations <
@@ -290,14 +297,19 @@ uniform uint ESMAASmoothingMaxIterations <
 	ui_category = "Smoothing";
 	ui_label = "SmoothingMaxIterations";
 	ui_min = 5; ui_max = 20; ui_step = 1;
-> = 10;
+> = 15;
+
+uniform bool SmoothingDebug <
+	ui_category = "Smoothing";
+	ui_label = "SmoothingDebug";
+> = false;
 
 
 // depths greater than this are considered part of the background/skybox
 #define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
 #define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
 // weights for luma calculations
-#define TSMAA_LUMA_REF float3(0.2126, 0.7152, 0.0722)
+#define TSMAA_LUMA_REF float3(0.299, 0.587, 0.114)
 
 /**
  * SMAA preprocessor variables, from Lordbean's ASSMAA
@@ -668,22 +680,17 @@ float3 SMAANeighborhoodBlendingWrapPS(
 /**
  * Algorithm called 'smoothing', found in Lordbean's TSMAA. 
  * Appears to fix inconsistencies at edges by nudging pixel values towards values of nearby pixels.
- * A little gem that combines well with SMAA, but not very performant.
+ * A little gem that combines well with SMAA, but causes a significant performance hit.
  *
  * Adapted from Lordbean's TSMAA shader. 
  */
 float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
  {
-	float2 midEdges = SMAASampleLevelZero(edgesSampler, texcoord).rg;
+	const float3 debugColorNoHits = float3(0.0,0.0,0.0);
+	const float3 debugColorSmallHit = float3(0.0,0.0,1.0);
+	const float3 debugColorBigHit = float3(1.0,0.0,0.0);
 
-	float4 midWeights = float4(
-		SMAASampleLevelZero(blendSampler, offset.xy).a, 
-		SMAASampleLevelZero(blendSampler, offset.zw).g, 
-		SMAASampleLevelZero(blendSampler, texcoord).zx
-	);
-
-	// Early return if no edges or weights found or smoothing is turned off.
-	if(!ESMAAEnableSmoothing || (!any(midWeights)) && !any(midEdges)) discard;
+	if(!ESMAAEnableSmoothing) discard;
 
 	float3 mid = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
     float3 original = mid;
@@ -702,10 +709,51 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float rangeMin = Lib::min(lumaS, lumaE, lumaN, lumaW, lumaM);
 	
     float range = rangeMax - rangeMin;
+
+	float threshold = SmoothingThreshold;
+
+	// Predicate threshold based on edge data. AKA If an edge is present, lower the threshold.
+	float4 edgeData;
+	#if __RENDERER__ >= 0xa000 // if DX10 or above
+		// get edge data from the bottom (x), bottom-right (y), right (z),
+		// and current pixels (w), in that order.
+		float4 leftEdges = tex2Dgather(edgesSampler, texcoord, 0);
+		float4 topEdges = tex2Dgather(edgesSampler, texcoord, 1);
+		edgeData = float4(
+			leftEdges.w,
+			topEdges.w,
+			leftEdges.z,
+			topEdges.x
+		);
+	#else // if DX9
+		edgeData = float4(
+			SMAASampleLevelZero(edgesSampler, texcoord).rg,
+			SMAASampleLevelZero(edgesSampler, offset.xy).r, 
+			SMAASampleLevelZero(edgesSampler, offset.zw).g
+		); 
+	#endif
+
+	// If there is an edge, lwoer threshold by multiplying with EdgeThresholdModifier
+	// Else leave uchanged by multiplying by 1.0
+	bool edgePresent = Lib::any(edgeData);
+	threshold *= edgePresent ? EdgeThresholdModifier : 1.0;
     
 	// early exit check
-    bool earlyExit = (range < __TSMAA_EDGE_THRESHOLD);
-	if (earlyExit) return original;
+    bool earlyExit = (range < threshold);
+	if (earlyExit) {
+
+		// If debug, return no hits color to signify no smoothing took place.
+		if(SmoothingDebug){
+			return debugColorNoHits;
+		}
+		return original;
+	}
+	// If debug, early return. Return hit colors to signify that smoothing takes place here
+	if(SmoothingDebug) {
+		// The further the range is above the threshold, the bigger the "hit"
+		float strength = smoothstep(threshold, 1.0, range);
+		return lerp(debugColorSmallHit, debugColorBigHit, strength);
+	}
 
 	float lumaNW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1,-1)).rgb, useluma, TSMAA_LUMA_REF);
     float lumaSE = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2( 1, 1)).rgb, useluma, TSMAA_LUMA_REF);
@@ -713,7 +761,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float lumaSW = Lib::dotweight(mid, SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb, useluma, TSMAA_LUMA_REF);
 
 	// These vals serve as caches, so they can be used later without having to redo them
-	// It's just an optimisation thing
+	// It's just an optimisation thing, though the difference it makes is so small it could just be statistical noise.
 	float lumaNWSW = lumaNW + lumaSW;
 	float lumaNS = lumaN + lumaS;
 	float lumaNESE = lumaNE + lumaSE;
@@ -723,12 +771,23 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	
     bool horzSpan = (abs(mad(-2.0, lumaW, lumaNWSW)) + mad(2.0, abs(mad(-2.0, lumaM, lumaNS)), abs(mad(-2.0, lumaE, lumaNESE)))) >= (abs(mad(-2.0, lumaS, lumaSWSE)) + mad(2.0, abs(mad(-2.0, lumaM, lumaWE)), abs(mad(-2.0, lumaN, lumaNWNE))));	
     float lengthSign = horzSpan ? BUFFER_RCP_HEIGHT : BUFFER_RCP_WIDTH;
+
+	float4 midWeights = float4(
+		SMAASampleLevelZero(blendSampler, offset.xy).a, 
+		SMAASampleLevelZero(blendSampler, offset.zw).g, 
+		SMAASampleLevelZero(blendSampler, texcoord).zx
+	);
 	
 	bool smaahoriz = max(midWeights.x, midWeights.z) > max(midWeights.y, midWeights.w);
     bool smaadata = Lib::any(midWeights);
-	float maxblending = 0.5 + (0.5 * Lib::max(midWeights.r, midWeights.g, midWeights.b, midWeights.a));
-	if (((horzSpan) && ((smaahoriz) && (smaadata))) || ((!horzSpan) && ((!smaahoriz) && (smaadata)))) maxblending *= 0.5;
-    else maxblending = min(maxblending * 1.5, 1.0);
+	float maxWeight = Lib::max(midWeights.r, midWeights.g, midWeights.b, midWeights.a);
+	float maxblending = 0.5 + (0.5 * maxWeight);
+
+	if ((horzSpan && smaahoriz && smaadata) || (!horzSpan && !smaahoriz && smaadata)) {
+		maxblending *= 1.0 - maxWeight / 2.0;
+	} else {
+		maxblending = min(maxblending * 1.5, 1.0);
+	};
 
 	float2 lumaNP = float2(lumaN, lumaS);
 	SMAAMovc(bool(!horzSpan).xx, lumaNP, float2(lumaW, lumaE));
@@ -778,7 +837,6 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			if (!doneN)
 			{
 				posN -= offNP;
-				// lumaEndN = dotweightopt(mid, posN, useluma);
 				lumaEndN = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posN).rgb, useluma, TSMAA_LUMA_REF);
 				lumaEndN -= lumaNN;
 				doneN = abs(lumaEndN) >= gradientScaled;
@@ -786,7 +844,6 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 			if (!doneP)
 			{
 				posP += offNP;
-				// lumaEndP = dotweightopt(mid, posP, useluma);
 				lumaEndP = Lib::dotweight(mid, SMAASampleLevelZero(ReShade::BackBuffer, posP).rgb, useluma, TSMAA_LUMA_REF);
 				lumaEndP -= lumaNN;
 				doneP = abs(lumaEndP) >= gradientScaled;
@@ -799,7 +856,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	SMAAMovc(bool(horzSpan).xx, dstNP, float2(texcoord.x - posN.x, posP.x - texcoord.x));
 
 	//TODO: consider turning this into a preprocessor value
-	maxblending = max(maxblending, ESMAASmoothingMinStrength) * ESMAASmoothingStrengthMod;
+	maxblending = maxblending * ESMAASmoothingStrengthMod;
 	
     bool goodSpan = (dstNP.x < dstNP.y) ? ((lumaEndN < 0.0) != lumaMLTZero) : ((lumaEndP < 0.0) != lumaMLTZero);
     float pixelOffset = mad(-rcp(dstNP.y + dstNP.x), min(dstNP.x, dstNP.y), 0.5);

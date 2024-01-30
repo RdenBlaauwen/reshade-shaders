@@ -207,7 +207,7 @@ static const float TSMAA_THRESHOLD_PRESET[4] = {0.125, 0.1, 0.075, 0.05};
 /*****************************************************************************************************************************************/
 
 #define __TSMAA_SMALLEST_COLOR_STEP rcp(pow(2, BUFFER_COLOR_BIT_DEPTH))
-#define __TSMAA_LUMA_REF float3(0.333333, 0.333334, 0.333333)
+#define __TSMAA_LUMA_REF float3(0.299, 0.587, 0.114)
 
 #define __TSMAA_BUFFER_INFO float4(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT, BUFFER_WIDTH, BUFFER_HEIGHT)
 
