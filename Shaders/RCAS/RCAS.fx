@@ -7,8 +7,11 @@ uniform float Sharpness <
   ui_label = "Sharpness";
 > = 1.0;
 
-#ifndef RCAS_GREEN_AS_LUMA
-  #define RCAS_GREEN_AS_LUMA 0
+//TODO: decide whether to remove this or not, as is isn't part of standard RCAS
+#define RCAS_GREEN_AS_LUMA 0
+
+#ifndef RCAS_DENOISE
+  #define RCAS_DENOISE 1
 #endif
 
 #include "ReShade.fxh"
@@ -51,11 +54,14 @@ float3 rcasPS(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
   float fL = getRCASLuma(f);
   float hL = getRCASLuma(h);
 
-  // Noise detection.
-  float nz = (bL + dL + fL + hL) * 0.25 - eL;
-  float range = max(max(max(bL, dL), max(hL, fL)), eL) - min(min(min(bL, dL), min(eL, fL)), hL);
-  nz = saturate(abs(nz) * rcp(range));
-  nz = -0.5 * nz + 1.0;
+  #if RCAS_DENOISE == 1
+    // Noise detection.
+    float nz = (bL + dL + fL + hL) * 0.25 - eL;
+    float range = max(max(max(bL, dL), max(hL, fL)), eL) - min(min(min(bL, dL), min(eL, fL)), hL);
+    nz = saturate(abs(nz) * rcp(range));
+    nz = -0.5 * nz + 1.0;
+  #endif
+
 
   // Min and max of ring.
   float3 minRGB = Lib::min(b, d, f, h);
@@ -70,8 +76,10 @@ float3 rcasPS(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
   float3 lobeRGB = max(-hitMin, hitMax);
   float lobe = max(-RCAS_LIMIT, min(Lib::max(lobeRGB), 0.0)) * Sharpness;
 
-  // Apply noise removal.
-  lobe *= nz;
+  #if RCAS_DENOISE == 1
+    // Apply noise removal.
+    lobe *= nz;
+  #endif
 
   // Resolve, which needs medium precision rcp approximation to avoid visible tonality changes.
   float rcpL = rcp(4.0 * lobe + 1.0);
