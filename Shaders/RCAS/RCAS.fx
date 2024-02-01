@@ -1,14 +1,27 @@
 #include "shared/lib.fxh"
 #include "ReShadeUI.fxh"
 
+#ifndef ENABLE_NON_STANDARD_FEATURES
+  #define ENABLE_NON_STANDARD_FEATURES 0
+#endif
+
 uniform float Sharpness <
   ui_type = "slider";
-  ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
+  ui_min = 0.0; ui_step = 0.01;
+  #if ENABLE_NON_STANDARD_FEATURES
+    ui_max = 1.25; 
+  #else
+    ui_max = 1.0;
+  #endif
   ui_label = "Sharpness";
 > = 1.0;
 
-//TODO: decide whether to remove this or not, as is isn't part of standard RCAS
-#define RCAS_GREEN_AS_LUMA 0
+#if ENABLE_NON_STANDARD_FEATURES == 1
+  uniform bool GreenAsLuma <
+    ui_type = "slider";
+    ui_label = "Use green as luma";
+  > = false;
+#endif
 
 #ifndef RCAS_DENOISE
   #define RCAS_DENOISE 1
@@ -22,13 +35,17 @@ uniform float Sharpness <
 texture ColorTex : COLOR;
 sampler colorBufferLinear {
   Texture = ColorTex;
-  SRGBTexture = true; // TODO: test this on or off
+  SRGBTexture = true;
 };
 
 float getRCASLuma(float3 rgb)
 {  
-  #if RCAS_GREEN_AS_LUMA
-    return rgb.g * 2.0;
+  #if ENABLE_NON_STANDARD_FEATURES
+    if(GreenAsLuma){
+      return rgb.g * 2.0;
+    }
+
+    return dot(rgb, RCAS_LUMA_WEIGHTS);
   #else
     return dot(rgb, RCAS_LUMA_WEIGHTS);
   #endif
