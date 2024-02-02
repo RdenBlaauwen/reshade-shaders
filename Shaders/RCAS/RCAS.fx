@@ -9,13 +9,22 @@ uniform int RCASIntroduction <
   ui_category = "about";
 	ui_type = "radio";
   ui_text = 
-    "RCAS_DENOISE - Noise reduction. Recommended value: 1\n"
-    "RCAS_PASSTHROUGH_ALPHA - Lets RCAS output the alpha channel, unchanged.\n"
-    "Recommended value: 0\n. If you're having trouble, try turning this on."
-    "ENABLE_NON_STANDARD_FEATURES - enables custom features not part\n"
-    "of ADM FidelityFX RCAS. Turned off by default, as the default is\n"
-    "supposed to approximate real RCAS as much as possible.\n"
-    "I recommend you try it out though.";
+    "------------------------------ Preprocessor Values ------------------------------\n"
+    "                RCAS_DENOISE: Noise reduction. Recommended value: 1\n"
+    "      RCAS_PASSTHROUGH_ALPHA: Lets RCAS output the alpha channel, unchanged.\n"
+    "                              Recommended value: 0. If you're having trouble,\n"
+    "                              try turning this on.\n"
+    "ENABLE_NON_STANDARD_FEATURES: Enables custom features not part of ADM FidelityFX RCAS.\n"
+    "                              Turned off by default, as the default is supposed to\n"
+    "                              approximate real RCAS as much as possible.\n"
+    "                              I recommend you try it out though.\n"
+    "\n"
+    "----------------------------------- Attention -----------------------------------\n"
+    "RCAS was never meant to be used as a stand-alone shader. I decided to do it anyways\n"
+    "because (imho) it has excellent results and performance. However, since this shader\n"
+    "uses RCAS in a way it was never intended to, I should make clear that any shortcomings\n"
+    "this shader may have are not representative of the quality of AMD FidelityFX FSR, or\n"
+    "any other of AMD FidelityFX' shaders, or of the skills of the AMD FidelityFX team.\n";
 >;
 
 uniform float Sharpness <
@@ -33,18 +42,21 @@ uniform float Sharpness <
 #if ENABLE_NON_STANDARD_FEATURES == 1
   uniform float RCASLimit <
     ui_type = "slider";
-    ui_min = 0.07; ui_max = 0.1875; ui_step = 0.001;
+    ui_min = 0.0; ui_max = 0.1875; ui_step = 0.001;
     ui_label = "Limit";
     ui_tooltip = 
       "Limits how much pixels can be sharpened.\n"
-      "Lower values reduce artifacts, but may reduce sharpening.";
+      "Lower values reduce artifacts, but reduce sharpening.\n"
+      "It's recommended to lower this value when using a\n"
+      "very high (> 1.2) sharpness values.";
   > = 0.1875;
 
   uniform bool GreenAsLuma <
     ui_type = "slider";
     ui_label = "Use green as luma.";
-    uit_tooltip =
-      "Better performance, but less precision";
+    ui_tooltip =
+      "Lets luma calculations use the green channel only.\n"
+      "Improves performance, but may cause worse graphical fidelity.";
   > = false;
 #endif
 
@@ -61,14 +73,8 @@ uniform float Sharpness <
 #define RCAS_LUMA_WEIGHTS float3(0.5, 1.0, 0.5) // TODO: consider using float3(0.598, 1.174, 0.228)
 
 #if ENABLE_NON_STANDARD_FEATURES == 1
-  #ifdef RCAS_LIMIT
-    #undef RCAS_LIMIT
-  #endif
   #define RCAS_LIMIT (RCASLimit) // TODO: lowering this prevents artifacts and noise at higher sharpnesses
 #else
-  #ifdef RCAS_LIMIT
-    #undef RCAS_LIMIT
-  #endif
   #define RCAS_LIMIT (0.25 - (1.0 / 16.0)) // TODO: lowering this prevents artifacts and noise at higher sharpnesses
 #endif
 
@@ -103,7 +109,7 @@ float3 rcasPS(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
     float3 e = curr.rgb;
     float alpha = curr.a;
   #else
-    float3 e =  tex2D(colorBufferLinear, texcoord).rgb;
+    float3 e = tex2D(colorBufferLinear, texcoord).rgb;
   #endif
 
   float3 b = tex2Doffset(colorBufferLinear, texcoord, int2(0,-1)).rgb;
@@ -159,19 +165,13 @@ technique RobustContrastAdaptiveSharpening
   <
     ui_label = "AMD FidelityFX Robust Contrast Adaptive Sharpening";
     ui_tooltip = 
-      "RCAS is a low overhead adaptive sharpening shader included in AMD FidelityFX FSR 1.\n"
+      "RCAS is a light-weight, adaptive sharpening shader included in AMD FidelityFX FSR 1.\n"
       "It is a derivative of AMD FidelityFX CAS, but it \"uses a more exact mechanism, \n"
       "solving for the maximum local sharpness possible before clipping.\"\n"
-      "It also lacks the support for scaling that AMD CAS has.\n";
+      "It also lacks the support for scaling that AMD CAS has.\n"
       "\n"
       "The algorithm applies less sharpening to areas that are already sharp, while more\n"
-      "featureless areas are sharpened more. This prevents artifacts, like ugly contours.\n"
-      "\n"
-      "RCAS was never meant to be used as a stand-alone shader. I decided to do it anyways\n"
-      "because (imho) it has excellent results and performance. However, since this shader\n"
-      "uses RCAS in a way it was never intended to, I should make clear that any shortcomings\n"
-      "this shader may have are not representative of the quality of AMD FidelityFX FSR, or\n"
-      "any other of AMD FidelityFX' shaders, or of the skills of the AMD FidelityFX team.\n";
+      "featureless areas are sharpened more. This prevents artifacts, like ugly contours.\n";
   >
 {
   pass
