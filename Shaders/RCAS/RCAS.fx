@@ -1,3 +1,31 @@
+// Copyright (C)2023 Advanced Micro Devices, Inc.
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy 
+// of this software and associated documentation files(the “Software”), to deal 
+// in the Software without restriction, including without limitation the rights 
+// to use, copy, modify, merge, publish, distribute, sublicense, and /or sell 
+// copies of the Software, and to permit persons to whom the Software is 
+// furnished to do so, subject to the following conditions :
+// 
+// The above copyright notice and this permission notice shall be included in 
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE 
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN 
+// THE SOFTWARE.
+
+//Implementation and additions by RdenBlaauwen:
+//  The defaults are supposed to approximate AMD FidelityFX RCAS to the best of my abilities.
+//  I added some additional features, but these are only available when
+//  ENABLE_NON_STANDARD_FEATURES is set to 1.
+//    - Option to use green as luma instead of the dot product of some weights
+//    - The ability to use a Sharpness value of > 1.0
+//    - Ability to lower the RCAS_LIMIT
+
 #include "shared/lib.fxh"
 #include "ReShadeUI.fxh"
 
@@ -10,7 +38,9 @@ uniform int RCASIntroduction <
 	ui_type = "radio";
   ui_text = 
     "------------------------------ Preprocessor Values ------------------------------\n"
-    "                RCAS_DENOISE: Noise reduction. Recommended value: 1\n"
+    "                RCAS_DENOISE: Noise reduction. Recommended value: 1 if there is\n"
+    "                              noise such at film grain. Otherwise it's best to\n"
+    "                              test whatever gives you best results yourself."
     "      RCAS_PASSTHROUGH_ALPHA: Lets RCAS output the alpha channel, unchanged.\n"
     "                              Recommended value: 0. If you're having trouble,\n"
     "                              try turning this on.\n"
@@ -60,10 +90,13 @@ uniform float Sharpness <
   > = false;
 #endif
 
+// RCAS also supports a define to enable a more expensive path to avoid some sharpening of noise.
+// Would suggest it is better to apply film grain after RCAS sharpening (and after scaling) instead of using this define,
 #ifndef RCAS_DENOISE
   #define RCAS_DENOISE 1
 #endif
 
+// RCAS sharpening supports a CAS-like pass-through alpha via the following
 #ifndef RCAS_PASSTHROUGH_ALPHA
   #define RCAS_PASSTHROUGH_ALPHA 0
 #endif
@@ -73,9 +106,10 @@ uniform float Sharpness <
 #define RCAS_LUMA_WEIGHTS float3(0.5, 1.0, 0.5) // TODO: consider using float3(0.598, 1.174, 0.228)
 
 #if ENABLE_NON_STANDARD_FEATURES == 1
-  #define RCAS_LIMIT (RCASLimit) // TODO: lowering this prevents artifacts and noise at higher sharpnesses
+  #define RCAS_LIMIT (RCASLimit)
 #else
-  #define RCAS_LIMIT (0.25 - (1.0 / 16.0)) // TODO: lowering this prevents artifacts and noise at higher sharpnesses
+  // This is set at the limit of providing unnatural results for sharpening.
+  #define RCAS_LIMIT (0.25 - (1.0 / 16.0))
 #endif
 
 texture ColorTex : COLOR;
@@ -98,6 +132,37 @@ float getRCASLuma(float3 rgb)
 }
 
 // Based on https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/main/sdk/include/FidelityFX/gpu/fsr1/ffx_fsr1.h#L684
+//==============================================================================================================================
+//
+//                                      FSR - [RCAS] ROBUST CONTRAST ADAPTIVE SHARPENING
+//
+//------------------------------------------------------------------------------------------------------------------------------
+// CAS uses a simplified mechanism to convert local contrast into a variable amount of sharpness.
+// RCAS uses a more exact mechanism, solving for the maximum local sharpness possible before clipping.
+// RCAS also has a built in process to limit sharpening of what it detects as possible noise.
+// RCAS sharper does not support scaling, as it should be applied after EASU scaling.
+// Pass EASU output straight into RCAS, no color conversions necessary.
+//------------------------------------------------------------------------------------------------------------------------------
+// RCAS is based on the following logic.
+// RCAS uses a 5 tap filter in a cross pattern (same as CAS),
+//    w                n
+//  w 1 w  for taps  w m e 
+//    w                s
+// Where 'w' is the negative lobe weight.
+//  output = (w*(n+e+w+s)+m)/(4*w+1)
+// RCAS solves for 'w' by seeing where the signal might clip out of the {0 to 1} input range,
+//  0 == (w*(n+e+w+s)+m)/(4*w+1) -> w = -m/(n+e+w+s)
+//  1 == (w*(n+e+w+s)+m)/(4*w+1) -> w = (1-m)/(n+e+w+s-4*1)
+// Then chooses the 'w' which results in no clipping, limits 'w', and multiplies by the 'sharp' amount.
+// This solution above has issues with MSAA input as the steps along the gradient cause edge detection issues.
+// So RCAS uses 4x the maximum and 4x the minimum (depending on equation)in place of the individual taps.
+// As well as switching from 'm' to either the minimum or maximum (depending on side), to help in energy conservation.
+// This stabilizes RCAS.
+// RCAS does a simple highpass which is normalized against the local contrast then shaped,
+//       0.25
+//  0.25  -1  0.25
+//       0.25
+// This is used as a noise detection filter, to reduce the effect of RCAS on grain, and focus on real edges.
 float3 rcasPS(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
 {
   // Algorithm uses minimal 3x3 pixel neighborhood.
@@ -124,8 +189,8 @@ float3 rcasPS(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
   float fL = getRCASLuma(f);
   float hL = getRCASLuma(h);
 
+  // Noise detection.
   #if RCAS_DENOISE == 1
-    // Noise detection.
     float nz = (bL + dL + fL + hL) * 0.25 - eL;
     float range = max(max(max(bL, dL), max(hL, fL)), eL) - min(min(min(bL, dL), min(eL, fL)), hL);
     nz = saturate(abs(nz) * rcp(range));
