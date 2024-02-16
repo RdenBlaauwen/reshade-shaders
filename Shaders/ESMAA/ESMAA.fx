@@ -417,13 +417,13 @@ uniform int SharpeningMethod < __UNIFORM_COMBO_INT1
 uniform float EdgeBias <
 	ui_type = "slider";
 	ui_category = "Sharpening";
-	ui_label = "Max # of corners";
+	ui_label = "Edge Bias";
 	ui_min = -4.0; ui_max = 0.0; ui_step = 0.01;
-> = 0.0;
+> = -2.0;
 
 uniform float SharpeningStrength <
-	uit_type = "slider";
 	ui_category = "Sharpening";
+	ui_type = "slider";
 	ui_label = "Sharpening strength";
 	ui_min = 0.0; ui_max = 2.0; ui_step = 0.01;
 > = 1.0;
@@ -1160,51 +1160,6 @@ float4 gatherEdges(float2 texcoord)
 	return edgeData;
 }
 
-// TODO: use pre-processing variables to disable this completely if necessary
-float3 SharpeningPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET
-{
-	// // Gather all 4 corners of the current pixel
-	// float4 edges = gatherEdges(texcoord);
-	// float corners = (edges.x + edges.z) * (edges.y + edges.w);
-	// // Early return if too many corners. Prevents sharpening of pixels that are already sharp
-	// if(corners > MaxCorners) discard;
-
-	// Gather all 4 edges of the current pixel
-	float4 edges = gatherEdges(texcoord);
-	float edgeCount = Lib::sum(edges);
-	// Reduce sharpening strength based on number of edges
-	// EdgeBias is negative or 0, so strengthModifier is <= 1.0;
-	float strengthModifier = 1.0 + (edgeCount / 4.0 * EdgeBias);
-
-	// Early return if strength is 0 or negative
-	if(strengthModifier <= 0.0) discard;
-
-	float strength = SharpeningStrength * strengthModifier;
-
-	// Separate the 0.0..=1.0 range from the 1.0..=2.0 range, so they can be processed differently.
-	float baseSharpness = saturate(strength);
-	float extraSharpness = saturate(strength - 1.0);
-
-	if(SharpeningMethod == 1) {
-		// equivalent to RCAS_LIMIT (0.25 - (1.0 / 16.0))
-		const float rcasLimit = 0.1875;
-
-		// Dividing top half of sharpening strength by 3.0 accounts for the fact that:
-		// - max sharpness for RCAS ~= 1.333
-		// - sharpening effect increases for faster at strength > 1.0 than strength <= 1.0
-		extraSharpness /= 3.0;
-
-		float sharpening = baseSharpness + extraSharpness;
-		return rcas(texcoord, rcasLimit, sharpening);
-
-	} else if (SharpeningMethod == 2) {
-
-		return cas(texcoord, extraSharpness, baseSharpness);
-	}
-
-	return SMAASampleLevelZero(colorLinearSampler, texcoord).rgb;
-}
-
 float getRCASLuma(float3 rgb)
 {
 	// Use green as luma for max performance, at cost of more artifacting.
@@ -1253,12 +1208,12 @@ float3 rcas(float2 texcoord, float limit, float sharpness)
   //    b
   //  d e f
   //    h
-  float3 e = tex2D(colorBufferLinear, texcoord).rgb;
+  float3 e = tex2D(colorLinearSampler, texcoord).rgb;
 
-  float3 b = tex2Doffset(colorBufferLinear, texcoord, int2(0,-1)).rgb;
-  float3 d = tex2Doffset(colorBufferLinear, texcoord, int2(-1,0)).rgb;
-  float3 f = tex2Doffset(colorBufferLinear, texcoord, int2(1,0)).rgb;
-  float3 h = tex2Doffset(colorBufferLinear, texcoord, int2(0,1)).rgb;
+  float3 b = tex2Doffset(colorLinearSampler, texcoord, int2(0,-1)).rgb;
+  float3 d = tex2Doffset(colorLinearSampler, texcoord, int2(-1,0)).rgb;
+  float3 f = tex2Doffset(colorLinearSampler, texcoord, int2(1,0)).rgb;
+  float3 h = tex2Doffset(colorLinearSampler, texcoord, int2(0,1)).rgb;
 
   // Get lumas times 2. Should use luma weights that are twice as large as normal.
   float bL = getRCASLuma(b);
@@ -1381,6 +1336,51 @@ float3 cas(float2 texcoord, float contrast, float sharpening)
 	return lerp(e, outColor, sharpening);
 }
 
+// TODO: use pre-processing variables to disable this completely if necessary
+float3 SharpeningPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET
+{
+	// // Gather all 4 corners of the current pixel
+	// float4 edges = gatherEdges(texcoord);
+	// float corners = (edges.x + edges.z) * (edges.y + edges.w);
+	// // Early return if too many corners. Prevents sharpening of pixels that are already sharp
+	// if(corners > MaxCorners) discard;
+
+	// Gather all 4 edges of the current pixel
+	float4 edges = gatherEdges(texcoord);
+	float edgeCount = Lib::sum(edges);
+	// Reduce sharpening strength based on number of edges
+	// EdgeBias is negative or 0, so strengthModifier is <= 1.0;
+	float strengthModifier = 1.0 + ((edgeCount / 4.0) * EdgeBias);
+
+	// Early return if strength is 0 or negative
+	if(strengthModifier <= 0.0) discard;
+
+	float strength = SharpeningStrength * strengthModifier;
+
+	// Separate the 0.0..=1.0 range from the 1.0..=2.0 range, so they can be processed differently.
+	float baseSharpness = saturate(strength);
+	float extraSharpness = saturate(strength - 1.0);
+
+	if(SharpeningMethod == 1) {
+		// equivalent to RCAS_LIMIT (0.25 - (1.0 / 16.0))
+		const float rcasLimit = 0.1875;
+
+		// Dividing top half of sharpening strength by 3.0 accounts for the fact that:
+		// - max sharpness for RCAS ~= 1.333
+		// - sharpening effect increases for faster at strength > 1.0 than strength <= 1.0
+		extraSharpness /= 4;
+
+		float sharpening = baseSharpness + extraSharpness;
+		return rcas(texcoord, rcasLimit, sharpening);
+
+	} else if (SharpeningMethod == 2) {
+
+		return cas(texcoord, extraSharpness, baseSharpness);
+	}
+
+	return SMAASampleLevelZero(colorLinearSampler, texcoord).rgb;
+}
+
 
 // Rendering passes
 
@@ -1410,6 +1410,7 @@ technique ESMAA
 	pass NeighborhoodBlendingPass
 	{
 		VertexShader = SMAANeighborhoodBlendingWrapVS;
+		// VertexShader = PostProcessVS;
 		PixelShader = SMAANeighborhoodBlendingWrapPS;
 		StencilEnable = false;
 		SRGBWriteEnable = true;
@@ -1428,5 +1429,6 @@ technique ESMAA
 	{
 		VertexShader = PostProcessVS;
 		PixelShader = SharpeningPS;
+		SRGBWriteEnable = true;
 	}
 }
