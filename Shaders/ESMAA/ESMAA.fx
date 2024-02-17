@@ -1163,11 +1163,10 @@ float4 gatherEdges(float2 texcoord)
 float getRCASLuma(float3 rgb)
 {
 	// Use green as luma for max performance, at cost of more artifacting.
-	// if(GreenAsLuma){
-		return rgb.g * 2.0;
-	// }
-
-	// return dot(rgb, RCAS_LUMA_WEIGHTS);
+	// Future iterations could provide an alternative method by calculating
+	// the dot product of rgb and luma weights of float3(1.0, 2.0, 1.0),
+	// which is more precise
+	return rgb.g * 2.0;
 }
 
 // Based on https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/main/sdk/include/FidelityFX/gpu/fsr1/ffx_fsr1.h#L684
@@ -1202,6 +1201,16 @@ float getRCASLuma(float3 rgb)
 //  0.25  -1  0.25
 //       0.25
 // This is used as a noise detection filter, to reduce the effect of RCAS on grain, and focus on real edges.
+/**
+ * @param texcoord: float2 The texel coordinates, equivalent to TEXCOORD
+ * @param limit: float Value that limits the max amount of sharpening and prevents artifacts
+ *	Lower values result in less artifacts, but also possibly less sharpening.
+ *	Default value should be (0.25 - (1.0 / 16.0))
+ * @param sharpness: float Degree of sharpening, non-linear. 
+ *	range: 0.0..=1.33. Values of > 1.33 are possible but cause extreme artifacts.
+ *	Recommended max value is 1.25. Likeliness of artifacts grows significantly above that value
+ * @return float3 Sharpened RGB values of the target texel
+ */
 float3 rcas(float2 texcoord, float limit, float sharpness)
 {
   // Algorithm uses minimal 3x3 pixel neighborhood.
@@ -1256,6 +1265,14 @@ float3 rcas(float2 texcoord, float limit, float sharpness)
  * Original: https://github.com/CeeJayDK/SweetFX/blob/master/Shaders/CAS.fx
  *
  * See description at the top of this file above for further credits.
+ * @param texcoord: float2 The texel coordinates, equivalent to TEXCOORD
+ * @param contrast: float Increases sharpening strength further.
+ *	Range: 0.0..=1.0
+ *	Default: 0.0
+ * @param sharpening: float Degree of sharpening, linear.
+ *	Range: 0.0..=1.0
+ *	Default: 1.0
+ * @return float3 Sharpened RGB values of the target texel
  */
 float3 cas(float2 texcoord, float contrast, float sharpening)
 {	
@@ -1339,11 +1356,8 @@ float3 cas(float2 texcoord, float contrast, float sharpening)
 // TODO: use pre-processing variables to disable this completely if necessary
 float3 SharpeningPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_TARGET
 {
-	// // Gather all 4 corners of the current pixel
-	// float4 edges = gatherEdges(texcoord);
-	// float corners = (edges.x + edges.z) * (edges.y + edges.w);
-	// // Early return if too many corners. Prevents sharpening of pixels that are already sharp
-	// if(corners > MaxCorners) discard;
+	const uint RCAS = 1;
+	const uint CAS = 2;
 
 	// Gather all 4 edges of the current pixel
 	float4 edges = gatherEdges(texcoord);
@@ -1361,23 +1375,25 @@ float3 SharpeningPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_
 	float baseSharpness = saturate(strength);
 	float extraSharpness = saturate(strength - 1.0);
 
-	if(SharpeningMethod == 1) {
+	if(SharpeningMethod == RCAS) {
+		//TODO: test if putting these on top of function changes performance.
 		// equivalent to RCAS_LIMIT (0.25 - (1.0 / 16.0))
 		const float rcasLimit = 0.1875;
+		const float rcasExtraSharpnessDivisor = 4.0;
 
 		// Dividing top half of sharpening strength by 3.0 accounts for the fact that:
-		// - max sharpness for RCAS ~= 1.333
-		// - sharpening effect increases for faster at strength > 1.0 than strength <= 1.0
-		extraSharpness /= 4;
+		// - sharpening effect increases faster at strength > 1.0 than at strength <= 1.0
+		extraSharpness /= rcasExtraSharpnessDivisor;
 
 		float sharpening = baseSharpness + extraSharpness;
 		return rcas(texcoord, rcasLimit, sharpening);
 
-	} else if (SharpeningMethod == 2) {
+	} else if (SharpeningMethod == CAS) {
 
 		return cas(texcoord, extraSharpness, baseSharpness);
 	}
 
+	// if SharpeningMethod == 0 (None), just return current pixel
 	return SMAASampleLevelZero(colorLinearSampler, texcoord).rgb;
 }
 
