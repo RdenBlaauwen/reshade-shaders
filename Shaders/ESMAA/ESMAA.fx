@@ -382,15 +382,29 @@ uniform float EdgeThresholdModifier <
 
 // creates max value for the `maxblending` var
 uniform float ESMAASmoothingStrengthMod <
-	ui_type = "slider";
 	ui_category = "Smoothing";
+	ui_type = "slider";
 	ui_label = "Strength modifier";
 	ui_min = 0.0; ui_max = 2.0; ui_step = 0.01;
 > = 1.0;
 
+uniform float SmoothingVignetteDistance <
+  ui_category = "Smoothing";
+  ui_type = "slider";
+  ui_label = "Thresh vignette distance";
+  ui_min = 0.0; ui_max = 0.707; ui_step = 0.01;
+> = 0.4;
+
+uniform float SmoothingTransitionDistance <
+ui_category = "Smoothing";
+  ui_type = "slider";
+  ui_label = "Thresh vignette transition";
+  ui_min = 0.0; ui_max = 0.707; ui_step = 0.01;
+> = 0.25;
+
 uniform uint ESMAASmoothingMaxIterations <
-	ui_type = "slider";
 	ui_category = "Smoothing";
+	ui_type = "slider";
 	ui_label = "SmoothingMaxIterations";
 	ui_min = 5; ui_max = 20; ui_step = 1;
 > = 15;
@@ -401,8 +415,8 @@ uniform bool SmoothingDebug <
 > = false;
 
 uniform int SharpeningMethod < __UNIFORM_COMBO_INT1
-	ui_label = "Sharpening method";
 	ui_category = "Sharpening";
+	ui_label = "Sharpening method";
 	ui_items = "None\0Fast\0Precise\0";
 > = 1;
 
@@ -814,7 +828,10 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	const float3 debugColorSmallHit = float3(0.0,0.0,1.0);
 	const float3 debugColorBigHit = float3(1.0,0.0,0.0);
 
-	if(!ESMAAEnableSmoothing) discard;
+  	float vignetteDist = distance(texcoord, 0.5);
+  	vignetteDist = smoothstep(SmoothingVignetteDistance, SmoothingVignetteDistance + SmoothingTransitionDistance, vignetteDist);
+
+	if(!ESMAAEnableSmoothing || vignetteDist == 1.0) discard;
 
 	float3 mid = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
     float3 original = mid;
@@ -834,7 +851,7 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	
     float range = rangeMax - rangeMin;
 
-	float threshold = SmoothingThreshold;
+	float threshold = lerp(SmoothingThreshold, 0.8, vignetteDist);
 
 	// Predicate threshold based on edge data. AKA If an edge is present, lower the threshold.
 	float4 edgeData;
