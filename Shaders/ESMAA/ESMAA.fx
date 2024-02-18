@@ -822,19 +822,14 @@ float3 SMAANeighborhoodBlendingWrapPS(
  *
  * Adapted from Lordbean's TSMAA shader. 
  */
-float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+float3 TSMAASmoothing(float4 vpos, float2 texcoord, float4 offset, float threshold) : SV_Target
  {
 	const float3 debugColorNoHits = float3(0.0,0.0,0.0);
 	const float3 debugColorSmallHit = float3(0.0,0.0,1.0);
 	const float3 debugColorBigHit = float3(1.0,0.0,0.0);
 
-  	float vignetteDist = distance(texcoord, 0.5);
-  	vignetteDist = smoothstep(SmoothingVignetteDistance, SmoothingVignetteDistance + SmoothingTransitionDistance, vignetteDist);
-
-	if(!ESMAAEnableSmoothing || vignetteDist == 1.0) discard;
-
 	float3 mid = SMAASampleLevelZero(ReShade::BackBuffer, texcoord).rgb;
-    float3 original = mid;
+  float3 original = mid;
 	
 	float lumaM = dot(mid, TSMAA_LUMA_REF);
 	float chromaM = Lib::dotsat(mid, lumaM);
@@ -850,34 +845,6 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
     float rangeMin = Lib::min(lumaS, lumaE, lumaN, lumaW, lumaM);
 	
     float range = rangeMax - rangeMin;
-
-	float threshold = lerp(SmoothingThreshold, 0.8, vignetteDist);
-
-	// Predicate threshold based on edge data. AKA If an edge is present, lower the threshold.
-	float4 edgeData;
-	#if __RENDERER__ >= 0xa000 // if DX10 or above
-		// get edge data from the bottom (x), bottom-right (y), right (z),
-		// and current pixels (w), in that order.
-		float4 leftEdges = tex2Dgather(edgesSampler, texcoord, 0);
-		float4 topEdges = tex2Dgather(edgesSampler, texcoord, 1);
-		edgeData = float4(
-			leftEdges.w,
-			topEdges.w,
-			leftEdges.z,
-			topEdges.x
-		);
-	#else // if DX9
-		edgeData = float4(
-			SMAASampleLevelZero(edgesSampler, texcoord).rg,
-			SMAASampleLevelZero(edgesSampler, offset.xy).r, 
-			SMAASampleLevelZero(edgesSampler, offset.zw).g
-		); 
-	#endif
-
-	// If there is an edge, lwoer threshold by multiplying with EdgeThresholdModifier
-	// Else leave uchanged by multiplying by 1.0
-	bool edgePresent = Lib::any(edgeData);
-	threshold *= edgePresent ? EdgeThresholdModifier : 1.0;
     
 	// early exit check
     bool earlyExit = (range < threshold);
@@ -1013,6 +980,54 @@ float3 TSMAASmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	SMAAMovc(bool2(!horzSpan, horzSpan), posM, mad(lengthSign, subpixOut, posM));
 
 	return SMAASampleLevelZero(ReShade::BackBuffer, posM).rgb;
+}
+
+/**
+ * Wrapper around TSMAASmoothing that fixe
+ */
+float3 SmoothingPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, float4 offset : TEXCOORD1) : SV_Target
+{
+	const float THRESHOLD_AT_TRANSITION_EXTREME = 0.8;
+	const float SCREEN_CENTER = 0.5;
+	if(!ESMAAEnableSmoothing) discard;
+
+	// Calc distance from center for threshold vignetting
+	float vignetteDist = distance(texcoord, SCREEN_CENTER);
+	// Area between VignetteDistance and VignetteDistance + TransitionDistance is lerped from 1.0 to 0.0.
+  // Anything below is 0.0, anything above is 1.0
+  float vignetteStrength = smoothstep(SmoothingVignetteDistance, SmoothingVignetteDistance + SmoothingTransitionDistance, vignetteDist);
+	// If strength equals 1.0, the distance from the center is too great to do smoothing.
+	if(vignetteStrength == 1.0) discard;
+
+	float threshold = lerp(SmoothingThreshold, THRESHOLD_AT_TRANSITION_EXTREME, vignetteStrength);
+
+		// Predicate threshold based on edge data. AKA If an edge is present, lower the threshold.
+	float4 edgeData;
+	#if __RENDERER__ >= 0xa000 // if DX10 or above
+		// get edge data from the bottom (x), bottom-right (y), right (z),
+		// and current pixels (w), in that order.
+		float4 leftEdges = tex2Dgather(edgesSampler, texcoord, 0);
+		float4 topEdges = tex2Dgather(edgesSampler, texcoord, 1);
+		edgeData = float4(
+			leftEdges.w,
+			topEdges.w,
+			leftEdges.z,
+			topEdges.x
+		);
+	#else // if DX9
+		edgeData = float4(
+			SMAASampleLevelZero(edgesSampler, texcoord).rg,
+			SMAASampleLevelZero(edgesSampler, offset.xy).r, 
+			SMAASampleLevelZero(edgesSampler, offset.zw).g
+		); 
+	#endif
+
+	// If there is an edge, lower threshold by multiplying with EdgeThresholdModifier
+	// Else leave uchanged by multiplying by 1.0
+	bool edgePresent = Lib::any(edgeData);
+	threshold *= edgePresent ? EdgeThresholdModifier : 1.0;
+
+	return TSMAASmoothing(vpos, texcoord, offset, threshold);
 }
 
 ////////////////////////////////////////////////////////////// SOFTENING ////////////////////////////////////////////////////////////////
@@ -1456,7 +1471,7 @@ technique ESMAA
 	pass ImageSmoothing
 	{
 		VertexShader = TSMAANeighborhoodBlendingVS;
-		PixelShader = TSMAASmoothingPS;
+		PixelShader = SmoothingPS;
 	}
 	pass Sharpening
 	{
