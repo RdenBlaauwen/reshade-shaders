@@ -288,6 +288,26 @@ uniform int ESMAADivider2 <
 	ui_label = " ";
 >;
 
+uniform float EdgeThresholdVignetteDistance <
+  ui_category = "Edge Detection";
+  ui_type = "slider";
+  ui_label = "Thresh vignette distance";
+  ui_min = 0.3; ui_max = 0.707; ui_step = 0.01;
+> = 0.5;
+
+uniform float EdgeThresholdTransitionDistance <
+ui_category = "Edge Detection";
+  ui_type = "slider";
+  ui_label = "Thresh vignette transition";
+  ui_min = 0.0; ui_max = 0.407; ui_step = 0.01;
+> = 0.25;
+
+uniform int ESMAADivider4 <
+	ui_category = "Edge Detection";
+	ui_type = "radio";
+	ui_label = " ";
+>;
+
 uniform bool ESMAAEnableAdaptiveThreshold <
 	ui_category = "Edge Detection";
 	ui_label = "Enable adaptive threshold";
@@ -653,9 +673,24 @@ float2 EdgeDetectionWrapperPS(
 	float2 texcoord : TEXCOORD0,
 	float4 offset[3] : TEXCOORD1) : SV_Target
 {
+	const float THRESHOLD_AT_TRANSITION_EXTREME = 0.8;
+	const float SCREEN_CENTER = 0.5;
+
+	// Calc distance from center for threshold vignetting
+	float vignetteDist = distance(texcoord, SCREEN_CENTER);
+	// Area between VignetteDistance and VignetteDistance + TransitionDistance is lerped from 1.0 to 0.0.
+  // Anything below is 0.0, anything above is 1.0
+  float vignetteStrength = smoothstep(
+		EdgeThresholdVignetteDistance, 
+		EdgeThresholdVignetteDistance + EdgeThresholdTransitionDistance, 
+		vignetteDist
+	);
+	// If strength equals 1.0, the distance from the center is too great to do smoothing.
+	if(vignetteStrength == 1.0) discard;
+
 	const float2 edgeThreshold = float2(SMAA_THRESHOLD,SMAA_THRESHOLD);
 
-	float2 threshold;
+	float2 finalThreshold;
 	if (DepthPredicationMethod > 0){
 		// Threshold for geometric edges
 		const float2 predicationThreshold = float2(PredicationEdgeThreshold, PredicationEdgeThreshold);
@@ -686,12 +721,19 @@ float2 EdgeDetectionWrapperPS(
 		}
 
 		// The higher the predication values (certainty), the closer to predicationThreshold 
-		threshold = lerp(edgeThreshold, predicationThreshold, Lib::max(predication));
+		finalThreshold = lerp(edgeThreshold, predicationThreshold, Lib::max(predication));
 	} else {
-		// if no depth predication, the threshold is just the edge threshold.
-		threshold = edgeThreshold;
-		// threshold = 0.075;
+		// if no depth predication, the finalThreshold is just the edge threshold.
+		finalThreshold = edgeThreshold;
+		// finalThreshold = 0.075;
 	}
+
+	// Apply thresh vignette to result
+	finalThreshold = lerp(
+		finalThreshold, 
+		THRESHOLD_AT_TRANSITION_EXTREME, 
+		vignetteStrength
+	);
 
 
 	if(EdgeDetectionMethod == 0){
@@ -699,7 +741,7 @@ float2 EdgeDetectionWrapperPS(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			threshold, 
+			finalThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
@@ -710,7 +752,7 @@ float2 EdgeDetectionWrapperPS(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			threshold, 
+			finalThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
@@ -721,7 +763,7 @@ float2 EdgeDetectionWrapperPS(
 			texcoord, 
 			offset, 
 			colorGammaSampler, 
-			threshold, 
+			finalThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
 			ESMAAThresholdFloor, 
@@ -733,7 +775,7 @@ float2 EdgeDetectionWrapperPS(
 		texcoord, 
 		offset, 
 		colorGammaSampler, 
-		threshold, 
+		finalThreshold, 
 		SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 		ESMAAEnableAdaptiveThreshold, 
 		ESMAAThresholdFloor, 
