@@ -408,12 +408,19 @@ uniform float ESMAASmoothingStrengthMod <
 	ui_min = 0.0; ui_max = 2.0; ui_step = 0.01;
 > = 1.0;
 
+uniform uint ESMAASmoothingMaxIterations <
+	ui_category = "Smoothing";
+	ui_type = "slider";
+	ui_label = "SmoothingMaxIterations";
+	ui_min = 5; ui_max = 20; ui_step = 1;
+> = 15;
+
 uniform float SmoothingVignetteDistance <
   ui_category = "Smoothing";
   ui_type = "slider";
   ui_label = "Thresh vignette distance";
   ui_min = 0.0; ui_max = 0.707; ui_step = 0.01;
-> = 0.4;
+> = 0.35;
 
 uniform float SmoothingTransitionDistance <
 ui_category = "Smoothing";
@@ -421,13 +428,6 @@ ui_category = "Smoothing";
   ui_label = "Thresh vignette transition";
   ui_min = 0.0; ui_max = 0.707; ui_step = 0.01;
 > = 0.25;
-
-uniform uint ESMAASmoothingMaxIterations <
-	ui_category = "Smoothing";
-	ui_type = "slider";
-	ui_label = "SmoothingMaxIterations";
-	ui_min = 5; ui_max = 20; ui_step = 1;
-> = 15;
 
 uniform bool SmoothingDebug <
 	ui_category = "Smoothing";
