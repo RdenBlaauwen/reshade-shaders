@@ -333,6 +333,25 @@ namespace ESMAACore
 
   namespace EdgeDetection
   {
+    // /**
+    // * Scales the input value so that lower and middle values get relatively bigger.
+    // * Result is clamped between floor and 1.0.
+    // * Useful for situation where extreme values shouldn't have a disproportionate effect.
+    // * 
+    // * @param input: float Some factor with a value of 0.0 - 1.0.
+    // * @param floor: float The minimum output.
+    // * @param scaleFactor: float The factor by which the input is multiplied.
+    // * @return float Factor that represents scaling strength. multiply threshold by this factor.
+    // */
+    // float getThresholdScale(float input, float floor, float scaleFactor){
+    //   return Lib::clampScale(
+    //     input, 
+    //     scaleFactor, 
+    //     floor, 
+    //     1.0
+    //     );
+    // }
+
     /**
     * Scales the input value so that lower and middle values get relatively bigger.
     * Result is clamped between floor and 1.0.
@@ -410,7 +429,9 @@ namespace ESMAACore
         // use biggest local luma as basis
         maxLuma = Lib::max(L, Lleft, Ltop);
         // scaled maxLuma so that only dark places have a significantly lower threshold
-        threshold *= getThresholdScale(maxLuma, threshScaleFloor, threshScaleFactor);
+        // threshold *= getThresholdScale(maxLuma, threshScaleFloor, threshScaleFactor);
+        threshold *= 1.0 - (threshScaleFactor * (1.0 - maxLuma));
+        threshold = max(threshScaleFloor, threshold);
       } 
       // ADAPTIVE THRESHOLD END
 
@@ -443,8 +464,10 @@ namespace ESMAACore
         // float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
         float finalMaxLuma = Lib::max(maxLuma, Lright, Lbottom, Lleftleft, Ltoptop);
         // scaled maxLuma so that only dark places have a significantly lower threshold
-        threshold = baseThreshold 
-          * getThresholdScale(finalMaxLuma, threshScaleFloor, threshScaleFactor);
+        // threshold = baseThreshold 
+        //   * getThresholdScale(finalMaxLuma, threshScaleFloor, threshScaleFactor);
+        threshold = baseThreshold * (1.0 - (threshScaleFactor * (1.0 - maxLuma)));
+        threshold = max(threshScaleFloor, threshold);
         // edges set to 1 if delta greater than thresholds, else set to 0
         edges = step(threshold, delta.xy);
       }

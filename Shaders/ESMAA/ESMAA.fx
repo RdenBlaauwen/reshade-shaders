@@ -315,22 +315,30 @@ uniform bool ESMAAEnableAdaptiveThreshold <
 				 "Lets the shader anti-aliase many jaggies it would normally miss, but may blur texures a bit.\n";
 > = true;
 
-uniform float ESMAAThreshScaleFactor <
-	ui_category = "Edge Detection";
-	ui_type = "slider";
-	ui_label = "Threshold scaling factor";
-	ui_min = 0.8; ui_max = 3.0; ui_step = 0.1;
-	ui_tooltip = "Lower values detect more in darker areas, but may cause artifacts and blur.";
-> = 2.0;
+// uniform float ESMAAThreshScaleFactor <
+// 	ui_category = "Edge Detection";
+// 	ui_type = "slider";
+// 	ui_label = "Threshold scaling factor";
+// 	ui_min = 0.8; ui_max = 3.0; ui_step = 0.1;
+// 	ui_tooltip = "Lower values detect more in darker areas, but may cause artifacts and blur.";
+// > = 2.0;
 
-uniform float ESMAAThresholdFloor <
-	ui_type = "slider";
+// uniform float ESMAAThresholdFloor <
+// 	ui_type = "slider";
+// 	ui_category = "Edge Detection";
+// 	ui_label = "Threshold floor";
+// 	ui_min = 0.1; ui_max = 0.5; ui_step = 0.01;
+// 	ui_tooltip = "The lowest the threshold can go. Higher values help prevent artifacts and\n"
+// 				 "blur, but may cause the shader to miss some jaggies in darker areas";
+// > = 0.21;
+
+uniform float ESMAALumaAdaptationRange <
 	ui_category = "Edge Detection";
-	ui_label = "Threshold floor";
-	ui_min = 0.1; ui_max = 0.5; ui_step = 0.01;
-	ui_tooltip = "The lowest the threshold can go. Higher values help prevent artifacts and\n"
-				 "blur, but may cause the shader to miss some jaggies in darker areas";
-> = 0.21;
+	ui_type = "slider";
+	ui_label = "ESMAALumaAdaptationRange";
+	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
+	ui_tooltip = "Lower values detect more in darker areas, but may cause artifacts and blur.";
+> = 0.8;
 
 uniform bool ESMAAEnableSoftening <
 	ui_category = "Image Softening";
@@ -468,6 +476,7 @@ uniform float SharpeningStrength <
 #define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
 // weights for luma calculations
 #define TSMAA_LUMA_REF float3(0.299, 0.587, 0.114)
+#define ESMAA_THRESHOLD_FLOOR 0.21
 
 /**
  * SMAA preprocessor variables, from Lordbean's ASSMAA
@@ -744,8 +753,8 @@ float2 EdgeDetectionWrapperPS(
 			finalThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
-			ESMAAThresholdFloor, 
-			ESMAAThreshScaleFactor
+			ESMAA_THRESHOLD_FLOOR, 
+			ESMAALumaAdaptationRange
 		);
 	} else if(EdgeDetectionMethod == 1){
 		return ESMAACore::EdgeDetection::ChromaDetection(
@@ -755,8 +764,8 @@ float2 EdgeDetectionWrapperPS(
 			finalThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
-			ESMAAThresholdFloor, 
-			ESMAAThreshScaleFactor
+			ESMAA_THRESHOLD_FLOOR, 
+			ESMAALumaAdaptationRange
 		);
 	} else if(EdgeDetectionMethod == 2){
 		return ESMAACore::EdgeDetection::EuclideanLumaDetection(
@@ -766,8 +775,8 @@ float2 EdgeDetectionWrapperPS(
 			finalThreshold, 
 			SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 			ESMAAEnableAdaptiveThreshold, 
-			ESMAAThresholdFloor, 
-			ESMAAThreshScaleFactor
+			ESMAA_THRESHOLD_FLOOR, 
+			ESMAALumaAdaptationRange
 		);
 	}
 	// if EdgeDetectionMethod == 4
@@ -778,8 +787,8 @@ float2 EdgeDetectionWrapperPS(
 		finalThreshold, 
 		SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR, 
 		ESMAAEnableAdaptiveThreshold, 
-		ESMAAThresholdFloor, 
-		ESMAAThreshScaleFactor
+		ESMAA_THRESHOLD_FLOOR, 
+		ESMAALumaAdaptationRange
 	);
 }
 
