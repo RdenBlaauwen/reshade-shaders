@@ -338,7 +338,7 @@ uniform float ESMAALumaAdaptationRange <
 	ui_label = "ESMAALumaAdaptationRange";
 	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
 	ui_tooltip = "Lower values detect more in darker areas, but may cause artifacts and blur.";
-> = 0.8;
+> = 0.95;
 
 uniform bool ESMAAEnableSoftening <
 	ui_category = "Image Softening";
@@ -476,7 +476,7 @@ uniform float SharpeningStrength <
 #define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
 // weights for luma calculations
 #define TSMAA_LUMA_REF float3(0.299, 0.587, 0.114)
-#define ESMAA_THRESHOLD_FLOOR 0.21
+#define ESMAA_THRESHOLD_FLOOR 0.018
 
 /**
  * SMAA preprocessor variables, from Lordbean's ASSMAA

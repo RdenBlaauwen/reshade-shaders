@@ -461,12 +461,8 @@ namespace ESMAACore
 
       if(enableAdaptiveThreshold){
         // get the greates from  ALL lumas this time
-        // float finalMaxLuma = max(maxLuma, max(Lright, max(Lbottom,max(Lleftleft,Ltoptop))));
         float finalMaxLuma = Lib::max(maxLuma, Lright, Lbottom, Lleftleft, Ltoptop);
-        // scaled maxLuma so that only dark places have a significantly lower threshold
-        // threshold = baseThreshold 
-        //   * getThresholdScale(finalMaxLuma, threshScaleFloor, threshScaleFactor);
-        threshold = baseThreshold * (1.0 - (threshScaleFactor * (1.0 - maxLuma)));
+        threshold = baseThreshold * (1.0 - (threshScaleFactor * (1.0 - finalMaxLuma)));
         threshold = max(threshScaleFloor, threshold);
         // edges set to 1 if delta greater than thresholds, else set to 0
         edges = step(threshold, delta.xy);
