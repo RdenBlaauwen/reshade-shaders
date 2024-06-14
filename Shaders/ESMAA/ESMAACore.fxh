@@ -333,42 +333,22 @@ namespace ESMAACore
 
   namespace EdgeDetection
   {
-    // /**
-    // * Scales the input value so that lower and middle values get relatively bigger.
-    // * Result is clamped between floor and 1.0.
-    // * Useful for situation where extreme values shouldn't have a disproportionate effect.
-    // * 
-    // * @param input: float Some factor with a value of 0.0 - 1.0.
-    // * @param floor: float The minimum output.
-    // * @param scaleFactor: float The factor by which the input is multiplied.
-    // * @return float Factor that represents scaling strength. multiply threshold by this factor.
-    // */
-    // float getThresholdScale(float input, float floor, float scaleFactor){
-    //   return Lib::clampScale(
-    //     input, 
-    //     scaleFactor, 
-    //     floor, 
-    //     1.0
-    //     );
-    // }
-
     /**
-    * Scales the input value so that lower and middle values get relatively bigger.
-    * Result is clamped between floor and 1.0.
-    * Useful for situation where extreme values shouldn't have a disproportionate effect.
+    * Generates a scaled version of input thresholds, where the tresholds are decreased by 
+    * the product of the brightness and the threshScaleFactor.
+    * The result is clamped between floor and 1.0.
     * 
-    * @param input: float Some factor with a value of 0.0 - 1.0.
-    * @param floor: float The minimum output.
-    * @param scaleFactor: float The factor by which the input is multiplied.
-    * @return float Factor that represents scaling strength. multiply threshold by this factor.
+    * @param baseThresholds: float2 The unscaled thresholds.
+    * @param brightness: float A factor representing local brightness with a value of 0.0 - 1.0
+    * @param threshScaleFactor: float Some factor with a value of 0.0 - 1.0. 
+    *   Thresholds are lowered by this amount when brightness is 1.0.
+    * @param threshScaleFloor: float The minimum value that the scaled thresholds can get.
+    * @return float2 Scaled thresholds
     */
-    float getThresholdScale(float input, float floor, float scaleFactor){
-      return Lib::clampScale(
-        input, 
-        scaleFactor, 
-        floor, 
-        1.0
-        );
+    float2 getScaledThreshold(float2 baseThresholds, float brightness, float threshScaleFactor, float threshScaleFloor)
+    {
+        float2 scaledTreshold = baseThresholds * (1.0 - (threshScaleFactor * (1.0 - brightness)));
+        return max(threshScaleFloor, scaledTreshold);
     }
 
     /**
@@ -429,55 +409,51 @@ namespace ESMAACore
         // use biggest local luma as basis
         maxLuma = Lib::max(L, Lleft, Ltop);
         // scaled maxLuma so that only dark places have a significantly lower threshold
-        // threshold *= getThresholdScale(maxLuma, threshScaleFloor, threshScaleFactor);
-        threshold *= 1.0 - (threshScaleFactor * (1.0 - maxLuma));
-        threshold = max(threshScaleFloor, threshold);
+        threshold = getScaledThreshold(baseThreshold, maxLuma, threshScaleFactor, threshScaleFloor);
       } 
       // ADAPTIVE THRESHOLD END
 
-        // We do the usual threshold:
-        float4 delta;
-        delta.xy = abs(L - float2(Lleft, Ltop));
-        float2 edges = step(threshold, delta.xy);
+      // We do the usual threshold:
+      float4 delta;
+      delta.xy = abs(L - float2(Lleft, Ltop));
+      float2 edges = step(threshold, delta.xy);
 
-        // Early return if there is no edge:
-        if (!Lib::any(edges))
-            discard;
+      // Early return if there is no edge:
+      if (!Lib::any(edges))
+          discard;
 
-        // Calculate right and bottom deltas:
-        float Lright = Lib::luma(ESMAASamplePoint(colorTex, offset[1].xy).rgb);
-        float Lbottom  = Lib::luma(ESMAASamplePoint(colorTex, offset[1].zw).rgb);
-        delta.zw = abs(L - float2(Lright, Lbottom));
+      // Calculate right and bottom deltas:
+      float Lright = Lib::luma(ESMAASamplePoint(colorTex, offset[1].xy).rgb);
+      float Lbottom  = Lib::luma(ESMAASamplePoint(colorTex, offset[1].zw).rgb);
+      delta.zw = abs(L - float2(Lright, Lbottom));
 
-        // Calculate the maximum delta in the direct neighborhood:
-        float2 maxDelta = max(delta.xy, delta.zw);
+      // Calculate the maximum delta in the direct neighborhood:
+      float2 maxDelta = max(delta.xy, delta.zw);
 
-        // Calculate left-left and top-top deltas:
-        float Lleftleft = Lib::luma(ESMAASamplePoint(colorTex, offset[2].xy).rgb);
-        float Ltoptop = Lib::luma(ESMAASamplePoint(colorTex, offset[2].zw).rgb);
-        delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
+      // Calculate left-left and top-top deltas:
+      float Lleftleft = Lib::luma(ESMAASamplePoint(colorTex, offset[2].xy).rgb);
+      float Ltoptop = Lib::luma(ESMAASamplePoint(colorTex, offset[2].zw).rgb);
+      delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
 
       // ADAPTIVE THRESHOLD second threshold check
-
       if(enableAdaptiveThreshold){
-        // get the greates from  ALL lumas this time
+        // get the greatest from  ALL lumas this time
         float finalMaxLuma = Lib::max(maxLuma, Lright, Lbottom, Lleftleft, Ltoptop);
-        threshold = baseThreshold * (1.0 - (threshScaleFactor * (1.0 - finalMaxLuma)));
-        threshold = max(threshScaleFloor, threshold);
+
+        threshold = getScaledThreshold(baseThreshold, maxLuma, threshScaleFactor, threshScaleFloor);
         // edges set to 1 if delta greater than thresholds, else set to 0
         edges = step(threshold, delta.xy);
       }
-
       // ADAPTIVE THRESHOLD second threshold check END
 
-        // Calculate the final maximum delta:
-        maxDelta = max(maxDelta.xy, delta.zw);
-        float finalDelta = max(maxDelta.x, maxDelta.y);
+      // Calculate the final maximum delta:
+      maxDelta = max(maxDelta.xy, delta.zw);
+      float finalDelta = max(maxDelta.x, maxDelta.y);
 
-        // Local contrast adaptation:
-        edges.xy *= step(finalDelta, localContrastAdaptationFactor * delta.xy);
+      // Local contrast adaptation:
+      edges.xy *= step(finalDelta, localContrastAdaptationFactor * delta.xy);
 
-        return edges;
+      return edges;
     }
 
     /**
@@ -525,20 +501,18 @@ namespace ESMAACore
       float threshScaleFloor,
       float threshScaleFactor
     ) {
-        // Calculate color deltas:
-        float4 delta;
-        float3 C = ESMAASamplePoint(colorTex, texcoord).rgb;
+      float4 delta;
+      // Calculate color deltas:
+      float3 C = ESMAASamplePoint(colorTex, texcoord).rgb;
+      float3 Cleft = ESMAASamplePoint(colorTex, offset[0].xy).rgb;
+      float3 t = abs(C - Cleft);
+      delta.x = Lib::max(t);
 
-        float3 Cleft = ESMAASamplePoint(colorTex, offset[0].xy).rgb;
-        float3 t = abs(C - Cleft);
-        delta.x = Lib::max(t);
-
-        float3 Ctop  = ESMAASamplePoint(colorTex, offset[0].zw).rgb;
-        t = abs(C - Ctop);
-        delta.y = Lib::max(t);
-
+      float3 Ctop  = ESMAASamplePoint(colorTex, offset[0].zw).rgb;
+      t = abs(C - Ctop);
+      delta.y = Lib::max(t);
+      
       // ADAPTIVE THRESHOLD START
-
       float maxChroma;
       float2 threshold = baseThreshold;
       if(enableAdaptiveThreshold){
@@ -548,42 +522,41 @@ namespace ESMAACore
           Lib::max(Ctop)
         );
         // scale maxChroma so that only dark places have a significantly lower threshold
-        threshold *= getThresholdScale(maxChroma, threshScaleFloor, threshScaleFactor);
+        threshold = getScaledThreshold(baseThreshold, maxChroma, threshScaleFactor, threshScaleFloor);
       }
-
       // ADAPTIVE THRESHOLD END
 
-        // We do the usual threshold:
-        float2 edges = step(threshold, delta.xy);
+      // We do the usual threshold:
+      float2 edges = step(threshold, delta.xy);
 
-        // Early return if there is no edge:
-        if (!Lib::any(edges))
-            discard;
+      // Early return if there is no edge:
+      if (!Lib::any(edges))
+          discard;
 
-        // Calculate right and bottom deltas:
-        float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
-        t = abs(C - Cright);
-        delta.z = Lib::max(t);
+      // Calculate right and bottom deltas:
+      float3 Cright = ESMAASamplePoint(colorTex, offset[1].xy).rgb;
+      t = abs(C - Cright);
+      delta.z = Lib::max(t);
 
-        float3 Cbottom  = ESMAASamplePoint(colorTex, offset[1].zw).rgb;
-        t = abs(C - Cbottom);
-        delta.w = Lib::max(t);
+      float3 Cbottom  = ESMAASamplePoint(colorTex, offset[1].zw).rgb;
+      t = abs(C - Cbottom);
+      delta.w = Lib::max(t);
 
-        // Calculate the maximum delta in the direct neighborhood:
-        float2 maxDelta = max(delta.xy, delta.zw);
+      // Calculate the maximum delta in the direct neighborhood:
+      float2 maxDelta = max(delta.xy, delta.zw);
 
-        // Calculate left-left and top-top deltas:
-        float3 Cleftleft  = ESMAASamplePoint(colorTex, offset[2].xy).rgb;
-        t = abs(Cleft - Cleftleft);
-        delta.z = Lib::max(t);
+      // Calculate left-left and top-top deltas:
+      float3 Cleftleft  = ESMAASamplePoint(colorTex, offset[2].xy).rgb;
+      t = abs(Cleft - Cleftleft);
+      delta.z = Lib::max(t);
 
-        float3 Ctoptop = ESMAASamplePoint(colorTex, offset[2].zw).rgb;
-        t = abs(Ctop - Ctoptop);
-        delta.w = Lib::max(t);
+      float3 Ctoptop = ESMAASamplePoint(colorTex, offset[2].zw).rgb;
+      t = abs(Ctop - Ctoptop);
+      delta.w = Lib::max(t);
 
-        // Calculate the final maximum delta:
-        maxDelta = max(maxDelta.xy, delta.zw);
-        float finalDelta = max(maxDelta.x, maxDelta.y);
+      // Calculate the final maximum delta:
+      maxDelta = max(maxDelta.xy, delta.zw);
+      float finalDelta = max(maxDelta.x, maxDelta.y);
 
       // ADAPTIVE THRESHOLD second threshold check
 
@@ -598,8 +571,8 @@ namespace ESMAACore
         );
         // scaled finalMaxChroma so that only dark places have a significantly lower threshold
         // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-        threshold = baseThreshold
-           * getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
+        threshold = getScaledThreshold(baseThreshold, finalMaxChroma, threshScaleFactor, threshScaleFloor);
+
         // edges = step(threshold, delta.xy);
         edges = step(threshold, delta.xy);
       }
@@ -680,7 +653,7 @@ namespace ESMAACore
           Lib::max(Ctop)
         );
         // scale maxChroma so that only dark places have a significantly lower threshold
-        threshold *= getThresholdScale(maxChroma, threshScaleFloor, threshScaleFactor);
+        threshold = getScaledThreshold(baseThreshold, maxChroma, threshScaleFactor, threshScaleFloor);
       }
 
       // ADAPTIVE THRESHOLD END
@@ -730,9 +703,7 @@ namespace ESMAACore
         );
         // scaled finalMaxChroma so that only dark places have a significantly lower threshold
         // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-        threshold = baseThreshold
-          * getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
-        // edges = step(threshold, delta.xy);
+        threshold = getScaledThreshold(baseThreshold, finalMaxChroma, threshScaleFactor, threshScaleFloor);
         edges = step(threshold, delta.xy);
       }
       
@@ -820,7 +791,7 @@ namespace ESMAACore
           Lib::max(Ctop)
         );
         // scale maxChroma so that only dark places have a significantly lower threshold
-        threshold *= getThresholdScale(maxChroma, threshScaleFloor, threshScaleFactor);
+        threshold = getScaledThreshold(baseThreshold, maxChroma, threshScaleFactor, threshScaleFloor);
       }
 
       // ADAPTIVE THRESHOLD END
@@ -878,9 +849,7 @@ namespace ESMAACore
         );
         // scaled finalMaxChroma so that only dark places have a significantly lower threshold
         // Multiplying by finalMaxChroma should scale the threshold according to the maximum local brightness
-        threshold = baseThreshold
-          * getThresholdScale(finalMaxChroma, threshScaleFloor, threshScaleFactor);
-        // edges = step(threshold, delta.xy);
+        threshold = getScaledThreshold(baseThreshold, finalMaxChroma, threshScaleFactor, threshScaleFloor);
         edges = step(threshold, delta.xy);
       }
       
