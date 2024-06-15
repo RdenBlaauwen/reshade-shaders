@@ -251,7 +251,7 @@ uniform int ESMAADivider1 <
 
 uniform int DepthPredicationMethod < __UNIFORM_COMBO_INT1
 	ui_category = "Edge Detection";
-	ui_items = "None\0Filtered edges\0Local average\0";
+	ui_items = "None\0Filtered edges\0Local average\0Simple local average\0";
 	ui_label = "DepthPredicationMethod";
 > = 2;
 
@@ -727,7 +727,16 @@ float2 EdgeDetectionWrapperPS(
 				false,
 				false
 			);
-		}
+		} else if(DepthPredicationMethod == 3) {
+			// Higher values = more confidence that an edge is there
+			predication = ESMAACore::Predication::SimpleDepthPredication(
+				texcoord, 
+				offset, 
+				ReShade::DepthBuffer, 
+				SMAA_DEPTH_THRESHOLD,
+				ESMAA_DEPTH_PREDICATION_THRESHOLD,
+			);
+		} 
 
 		// The higher the predication values (certainty), the closer to predicationThreshold 
 		finalThreshold = lerp(edgeThreshold, predicationThreshold, Lib::max(predication));
