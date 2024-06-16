@@ -93,6 +93,24 @@ namespace ESMAACore
   namespace Predication
   {
 
+    /**
+    * Adjusts the threshold by means of predication.
+    */
+    float2 ESMAACalculatePredicatedThreshold(
+      float2 texcoord,
+      float4 offset[3],
+      ESMAASampler2D(depthSampler),
+      float depthThreshold,
+      float threshold,
+      float predicationScale,
+      float strength
+    ) {
+        float3 neighbours = SMAAGatherNeighbours(texcoord, offset, SMAATexturePass2D(depthSampler));
+        float2 delta = abs(neighbours.xx - neighbours.yz);
+        float2 edges = step(depthThreshold, delta);
+        return predicationScale * threshold * (1.0 - strength * edges);
+    }
+
     // TODO: adapt for remaining depth predication method
     /**
     * This function is meant for edge predication. It detects geometric edges using depth-detection with high accuracy, but in a symmetric fashion.
