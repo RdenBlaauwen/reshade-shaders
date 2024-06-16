@@ -78,9 +78,11 @@
 #define ESMAASampler2D(tex) sampler tex
 #define ESMAASample(tex, coord) tex2D(tex, coord)
 #define ESMAASamplePoint(tex, coord) ESMAASample(tex, coord)
+#define ESMAASampleLevelZero(tex, coord) tex2Dlod(tex, float4(coord, coord))
 #define ESMAASampleLevelZeroOffset(tex, coord, offset) tex2Dlodoffset(tex, float4(coord, coord), offset)
 #define ESMAAGatherRed(tex, coord) tex2Dgather(tex, texcoord, 0);
 #define ESMAAGatherRedOffset(tex, coord, offset) tex2Dgatheroffset(tex, texcoord, offset, 0);
+#define PIXEL_SIZE float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT) //TODO: Refactor?
 
 #define ESMAA_RENDERER __RENDERER__
 #define ESMAA_RENDERER_D3D10 0xa000 
@@ -90,80 +92,6 @@ namespace ESMAACore
 {
   namespace Predication
   {
-
-    float2 SimpleDepthPredication(
-      float2 texcoord, 
-      float4 offset[3],
-      ESMAASampler2D(depthSampler), 
-      float detectionThresh,
-      float predictionThresh,
-      )
-    {
-      // pattern:
-      //  e f
-      //  h a
-      // Where 'a' is the current pixel
-      float e,f,h,a;
-
-      #if ESMAA_RENDERER >= ESMAA_RENDERER_D3D10 // if DX10 or above
-        // get RGB values from the c, d, b, and a positions, in order.
-        float4 hafe = ESMAAGatherRedOffset(depthSampler, texcoord, int2(-1, -1));
-        e = hafe.w;
-        f = hafe.z;
-        h = hafe.x;
-        a = hafe.y;
-      #else // if DX9
-        e = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, -1)).r;
-        f = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, -1)).r;
-        h = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 0)).r;
-        a = SMAASampleLevelZero(depthSampler, texcoord).r;
-      #endif
-
-      float currDepth = Lib::linearizeDepth(a);
-      float topDepth = Lib::linearizeDepth(f);
-      float leftDepth = Lib::linearizeDepth(h);
-
-      // Scale so that the treshold is lower closeup, higher at medium distances, and much lower far away.
-      // TODO: refactor, isolate into separate function.
-      // TODO: See if replacing by lookup table improves performance.
-      float depthScaling = (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
-      float detectionThreshold = detectionThresh * depthScaling;
-
-      float3 neighbours = float3(currDepth, leftDepth, topDepth);
-      float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
-      float2 edges = step(detectionThreshold, delta);
-
-      if (!Lib::any(edges)) return edges;
-
-      const float no = 0.0;
-      const float signifMaybe = 0.6;
-      const float yes = 1.0;
-
-      predictionThresh *= a + saturate(0.001 - a) * 2.0;
-
-      float ht = (e + f) / 2.0;
-      float hb = (h + a) / 2.0;
-      float vl = (e + h) / 2.0;
-      float vr = (a + f) / 2.0;
-
-      float crn1 = (h + e + f) / 3.0;
-      float crn2 = (a + e + f) / 3.0;
-      float crn3 = (h + a + f) / 3.0;
-      float crn4 = (h + e + a) / 3.0;
-
-      float lMin = Lib::min(ht, hb, vl, vr, crn1, crn2, crn3, crn4);
-      float lMax = Lib::max(ht, hb, vl, vr, crn1, crn2, crn3, crn4);
-      float localAvg = (ht + hb + vl + vr + crn1 + crn2 + crn3 + crn4 - lMin - lMax) / 6.0;
-
-      float localDelta = abs(a - localAvg);
-
-      if (localDelta > predictionThresh) {
-        return max(edges, float(signifMaybe).xx); 
-        // return edges;
-      }
-      return float(no).xx;
-    }
-
     float2 FilteredDepthPredication(
       float2 texcoord, 
       float4 offset[3],
@@ -192,7 +120,7 @@ namespace ESMAACore
         e = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, -1)).r;
         f = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, -1)).r;
         h = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 0)).r;
-        a = SMAASampleLevelZero(depthSampler, texcoord).r;
+        a = ESMAASampleLevelZero(depthSampler, texcoord).r;
         original = a;
       #endif
 
@@ -330,7 +258,7 @@ namespace ESMAACore
         e = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, -1)).r;
         f = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, -1)).r;
         h = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 0)).r;
-        a = SMAASampleLevelZero(depthSampler, texcoord).r;
+        a = ESMAASampleLevelZero(depthSampler, texcoord).r;
         original = a;
       #endif
 
@@ -371,15 +299,15 @@ namespace ESMAACore
 
       // TODO: consider only doing early return if all edges are negated by an opposing edge
       // rather than detection of any opposing edge.
-      if(useOpposingEdgesCheck){
-        float3 oppNeighbs = float3(a, b, c);
-        float2 oppDelta = abs(oppNeighbs.xx - float2(oppNeighbs.y, oppNeighbs.z));
-        edges = step(detectionThreshold, oppDelta);
+      // if(useOpposingEdgesCheck){
+      //   float3 oppNeighbs = float3(a, b, c);
+      //   float2 oppDelta = abs(oppNeighbs.xx - float2(oppNeighbs.y, oppNeighbs.z));
+      //   edges = step(detectionThreshold, oppDelta);
 
-        // Early return if there is an edge:
-        if (Lib::any(edges))
-          return float2(no, no);
-      }
+      //   // Early return if there is an edge:
+      //   if (Lib::any(edges))
+      //     return float2(no, no);
+      // }
 
       float x1 = (e + f + g) / 3.0;
       float x2 = (h + b) / 2.0;
@@ -401,6 +329,35 @@ namespace ESMAACore
         return float2(signifMaybe, signifMaybe); 
       }
       return float2(no, no);
+    }
+
+    float2 SimpleLocalAverageDepthPredication(
+      float2 texcoord, 
+      float4 offset[3],
+      ESMAASampler2D(depthSampler), 
+      float detectionThresh
+      )
+    {
+      const float sampleOffset = 0.5;
+      float4 samples;
+      float target = ESMAASampleLevelZero(depthSampler, texcoord).r; 
+      samples.r = tex2D(depthSampler, texcoord - float2(PIXEL_SIZE.x, -PIXEL_SIZE.y) * sampleOffset).r; // North West
+      samples.g = tex2D(depthSampler, texcoord + PIXEL_SIZE * sampleOffset).r; // North East
+      samples.b = tex2D(depthSampler, texcoord + float2(PIXEL_SIZE.x, -PIXEL_SIZE.y) * sampleOffset).r; // South East
+      samples.a = tex2D(depthSampler, texcoord - PIXEL_SIZE * sampleOffset).r;  // South West
+
+      detectionThresh *= target + saturate(0.001 - target) * 2.0;
+
+      float4 doubleAvgs = (samples.rgba + samples.gbar) / 2.0;
+      float4 cornerAvgs = (samples.rgba + samples.gbar + samples.barg) / 3.0;
+
+      float minDepth = min(Lib::min(doubleAvgs),Lib::min(cornerAvgs));
+      float maxDepth = max(Lib::max(doubleAvgs),Lib::max(cornerAvgs));
+      
+      float localAvg = (Lib::sum(doubleAvgs) + Lib::sum(cornerAvgs) - minDepth - maxDepth) / 6.0;
+      float delta = abs(target - localAvg);
+
+      return delta > detectionThresh ? float(1.0).xx : float(0.0).xx;
     }
   }
 
