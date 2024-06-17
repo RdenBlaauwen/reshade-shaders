@@ -207,7 +207,7 @@ uniform int CornerRounding < __UNIFORM_SLIDER_INT1
 > = 10;
 
 uniform int DebugOutput < __UNIFORM_COMBO_INT1
-	ui_items = "None\0View edges\0View weights\0SimpleLocalAverageDepthPredication\0SMAAEdgePredicationLogarithmic\0";
+	ui_items = "None\0View edges\0View weights\0GetEdgePredictionFactor\0SMAAEdgePredicationLogarithmic\0";
 	ui_label = "Debug Output";
 > = false;
 
@@ -251,29 +251,29 @@ uniform int ESMAADivider1 <
 
 uniform int DepthPredicationMethod < __UNIFORM_COMBO_INT1
 	ui_category = "Edge Detection";
-	ui_items = "None\0Simple Local average\0";
+	ui_items = "None\0Simple\0Edge prediction\0";
 	ui_label = "DepthPredicationMethod";
 > = 2;
 
-// Threshold for detecting edges around edges of geometric objects or even polygons
-uniform float PredicationEdgeThreshold < __UNIFORM_DRAG_FLOAT1
-	ui_category = "Edge Detection";
-	ui_label = "Predication Edge Threshold";
-	ui_min = 0.01; ui_max = 0.050; ui_step = 0.001;
-> = 0.021;
-
-uniform float DepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
+uniform float PredicationThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Threshold for local avg";
 	ui_min = 0.003; ui_max = 0.05; ui_step = 0.001;
 	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
 > = 0.02;
 
-uniform float DepthEdgeAvgDetectionThreshold < __UNIFORM_DRAG_FLOAT1
+uniform float EdgeEstimationThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
-	ui_label = "DepthEdgeAvgDetectionThresh";
+	ui_label = "EdgeEstimationThreshold";
 	ui_min = 0.5; ui_max = 2.0; ui_step = 0.1;
-> = 0.8;
+> = 1.2;
+
+uniform float PredicationAmount < __UNIFORM_DRAG_FLOAT1
+	ui_category = "Edge Detection";
+	ui_label = "Threshold for local avg";
+	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
+	ui_tooltip = "Amount by which threshold is lowered upon finding a depth edge.";
+> = 0.95;
 
 uniform int ESMAADivider2 <
 	ui_category = "Edge Detection";
@@ -307,23 +307,6 @@ uniform bool ESMAAEnableAdaptiveThreshold <
 	ui_tooltip = "Adapts edge detection threshold for darker areas, where more sensitivity is needed.\n"
 				 "Lets the shader anti-aliase many jaggies it would normally miss, but may blur texures a bit.\n";
 > = true;
-
-// uniform float ESMAAThreshScaleFactor <
-// 	ui_category = "Edge Detection";
-// 	ui_type = "slider";
-// 	ui_label = "Threshold scaling factor";
-// 	ui_min = 0.8; ui_max = 3.0; ui_step = 0.1;
-// 	ui_tooltip = "Lower values detect more in darker areas, but may cause artifacts and blur.";
-// > = 2.0;
-
-// uniform float ESMAAThresholdFloor <
-// 	ui_type = "slider";
-// 	ui_category = "Edge Detection";
-// 	ui_label = "Threshold floor";
-// 	ui_min = 0.1; ui_max = 0.5; ui_step = 0.01;
-// 	ui_tooltip = "The lowest the threshold can go. Higher values help prevent artifacts and\n"
-// 				 "blur, but may cause the shader to miss some jaggies in darker areas";
-// > = 0.21;
 
 uniform float ESMAALumaAdaptationRange <
 	ui_category = "Edge Detection";
@@ -466,17 +449,21 @@ uniform float SharpeningStrength <
 
 // depths greater than this are considered part of the background/skybox
 #define ESMAA_BACKGROUND_DEPTH_THRESHOLD 0.999
-#define ESMAA_DEPTH_PREDICATION_THRESHOLD (0.000001 * pow(10,DepthEdgeAvgDetectionThreshold))
+#define ESMAA_EDGE_PREDICTION_THRESHOLD (0.000001 * pow(10,EdgeEstimationThreshold))
 // weights for luma calculations
 #define TSMAA_LUMA_REF float3(0.299, 0.587, 0.114)
 #define ESMAA_THRESHOLD_FLOOR 0.018
+
+#ifndef ESMAA_EDGE_PREDICTION_WEIGHT
+	#define ESMAA_EDGE_PREDICTION_WEIGHT 0.8 //TODO: test this value.
+#endif
 
 /**
  * SMAA preprocessor variables, from Lordbean's ASSMAA
  */
 #ifdef SMAA_PRESET_CUSTOM
 	#define SMAA_THRESHOLD EdgeDetectionThreshold
-	#define SMAA_DEPTH_THRESHOLD DepthEdgeDetectionThreshold
+	#define SMAA_DEPTH_THRESHOLD 0.004
 	#define SMAA_MAX_SEARCH_STEPS MaxSearchSteps
 	#define SMAA_CORNER_ROUNDING CornerRounding
 	#define SMAA_MAX_SEARCH_STEPS_DIAG MaxSearchStepsDiagonal
@@ -690,35 +677,36 @@ float2 EdgeDetectionWrapperPS(
 	// If strength equals 1.0, the distance from the center is too great to do smoothing.
 	if(vignetteStrength == 1.0) discard;
 
-	const float2 edgeThreshold = float2(SMAA_THRESHOLD,SMAA_THRESHOLD);
+	float2 threshold = float2(SMAA_THRESHOLD,SMAA_THRESHOLD);
 
-	float2 finalThreshold;
 	if (DepthPredicationMethod > 0){
-		// Threshold for geometric edges
-		const float2 predicationThreshold = float2(PredicationEdgeThreshold, PredicationEdgeThreshold);
-
-		float2 predication;
-		if(DepthPredicationMethod == 1) {
-			// Higher values = more confidence that an edge is there
-			predication = ESMAACore::Predication::SimpleLocalAverageDepthPredication(
+		// Higher values = more confidence that an edge is there
+		float2 predicationAmount = ESMAACore::Predication::GetPredicationFactor(
 				texcoord, 
 				offset, 
 				ReShade::DepthBuffer, 
-				ESMAA_DEPTH_PREDICATION_THRESHOLD
+				PredicationThreshold
 			);
+
+		if(DepthPredicationMethod == 2) {
+			// Higher values = more confidence that an edge is there
+			float2 predicationFactor = ESMAACore::Predication::GetEdgePredictionFactor(
+				texcoord, 
+				offset, 
+				ReShade::DepthBuffer, 
+				ESMAA_EDGE_PREDICTION_THRESHOLD
+			) * ESMAA_EDGE_PREDICTION_WEIGHT;
+
+			predicationAmount = max(predicationAmount, predicationFactor);
 		}
 
 		// The higher the predication values (certainty), the closer to predicationThreshold 
-		finalThreshold = lerp(edgeThreshold, predicationThreshold, Lib::max(predication));
-	} else {
-		// if no depth predication, the finalThreshold is just the edge threshold.
-		finalThreshold = edgeThreshold;
-		// finalThreshold = 0.075;
+		threshold *= 1.0 - (predicationAmount * PredicationAmount);
 	}
 
 	// Apply thresh vignette to result
-	finalThreshold = lerp(
-		finalThreshold, 
+	threshold = lerp(
+		threshold, 
 		THRESHOLD_AT_TRANSITION_EXTREME, 
 		vignetteStrength
 	);
@@ -806,11 +794,11 @@ float3 SMAANeighborhoodBlendingWrapPS(
 		edgeOffset[1] = float4(offset.x,offset.y,offset.z,offset.w);
 		edgeOffset[2] = float4(-offset.x*2.0,offset.y,offset.z,-offset.w*2.0);
 
-		float2 depthEdges = ESMAACore::Predication::SimpleLocalAverageDepthPredication(
+		float2 depthEdges = ESMAACore::Predication::GetEdgePredictionFactor(
 			texcoord, 
 			edgeOffset, 
 			ReShade::DepthBuffer, 
-			ESMAA_DEPTH_PREDICATION_THRESHOLD
+			ESMAA_EDGE_PREDICTION_THRESHOLD
 		);
 		return float3(depthEdges, 0.0);
 	}
@@ -822,13 +810,11 @@ float3 SMAANeighborhoodBlendingWrapPS(
 		edgeOffset[1] = float4(offset.x,offset.y,offset.z,offset.w);
 		edgeOffset[2] = float4(-offset.x*2.0,offset.y,offset.z,-offset.w*2.0);
 
-		float2 depthEdges = ESMAACore::Predication::ESMAACalculatePredicatedThreshold(
+		float2 depthEdges = ESMAACore::Predication::GetPredicationFactor(
 			texcoord, 
 			edgeOffset, 
 			ReShade::DepthBuffer, 
-			SMAA_DEPTH_THRESHOLD,
-			1.0,
-			0.4
+			PredicationThreshold
 		);
 		return float3(depthEdges, 0.0);
 	}

@@ -96,21 +96,17 @@ namespace ESMAACore
     /**
     * Adjusts the threshold by means of predication.
     */
-    float2 ESMAACalculatePredicatedThreshold(
+    float2 GetPredicationFactor(
       float2 texcoord,
       float4 offset[3],
       ESMAASampler2D(depthSampler),
-      float depthThreshold,
-      // float threshold,
-      float predicationScale,
-      float strength
+      float depthThreshold
     ) {
         float4 kek = ESMAAGatherRedOffset(depthSampler, texcoord, int2(-1,-1));
         float3 neighbours = kek.grb;
         float2 delta = abs(neighbours.xx - neighbours.yz);
         depthThreshold *= neighbours.x + saturate(0.001 - neighbours.x) * 2.0;
-        float2 edges = step(depthThreshold, delta);
-        return predicationScale * (1.0 - strength * edges);
+        return step(depthThreshold, delta);
     }
 
     // TODO: adapt for remaining depth predication method
@@ -154,13 +150,14 @@ namespace ESMAACore
     * Warning: do NOT use this as a true edge-detection algo. It WILL lead to false positives and artifacts!
     */
 
-    float2 SimpleLocalAverageDepthPredication(
+    float2 GetEdgePredictionFactor(
       float2 texcoord, 
       float4 offset[3],
       ESMAASampler2D(depthSampler), 
       float detectionThresh
       )
     {
+      //TODO: define preprocessor value for this in the main shader
       // const float sampleOffset = 0.5;
       const float sampleOffset = 0.2;
       float4 samples;
@@ -170,11 +167,12 @@ namespace ESMAACore
       samples.b = tex2D(depthSampler, texcoord + float2(PIXEL_SIZE.x, -PIXEL_SIZE.y) * sampleOffset).r; // South East
       samples.a = tex2D(depthSampler, texcoord - PIXEL_SIZE * sampleOffset).r;  // South West
 
+      //TODO: refactor, describe
       detectionThresh *= target + saturate(0.001 - target) * 2.0;
 
       float4 doubleAvgs = (samples.rgba + samples.gbar) / 2.0;
       float4 cornerAvgs = (samples.rgba + samples.gbar + samples.barg) / 3.0;
-
+      //TODO: test version that takes target depth into account
       float minDepth = min(Lib::min(doubleAvgs),Lib::min(cornerAvgs));
       float maxDepth = max(Lib::max(doubleAvgs),Lib::max(cornerAvgs));
       
