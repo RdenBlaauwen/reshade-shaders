@@ -177,7 +177,6 @@
 
 // #include "../shared/lib.fxh" // Not necesssary as long as "ESMAACore.fxh" is included
 #include "ReShade.fxh"
-#include "ESMAACore.fxh"
 
 //------------------- Preprocessor Settings -------------------
 
@@ -260,20 +259,20 @@ uniform int DepthPredicationMethod < __UNIFORM_COMBO_INT1
 uniform float PredicationEdgeThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Predication Edge Threshold";
-	ui_min = 0.000; ui_max = 0.050; ui_step = 0.001;
-> = 0.030;
+	ui_min = 0.01; ui_max = 0.050; ui_step = 0.001;
+> = 0.021;
 
 uniform float DepthEdgeDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Threshold for local avg";
-	ui_min = 0.01; ui_max = 0.05; ui_step = 0.001;
+	ui_min = 0.003; ui_max = 0.05; ui_step = 0.001;
 	ui_tooltip = "Depth Edge detection threshold. If SMAA misses some edges try lowering this slightly.";
 > = 0.02;
 
 uniform float DepthEdgeAvgDetectionThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "DepthEdgeAvgDetectionThresh";
-	ui_min = 0.1; ui_max = 2.0; ui_step = 0.1;
+	ui_min = 0.5; ui_max = 2.0; ui_step = 0.1;
 > = 0.8;
 
 uniform int ESMAADivider2 <
@@ -508,6 +507,7 @@ uniform float SharpeningStrength <
 // #define __TSMAA_EDGE_THRESHOLD (PredicationEdgeThreshold) //TODO: test if this must be reactivated
 
 #include "SMAA.fxh"
+#include "ESMAACore.fxh"
 
 // Textures
 
@@ -826,10 +826,9 @@ float3 SMAANeighborhoodBlendingWrapPS(
 			texcoord, 
 			edgeOffset, 
 			ReShade::DepthBuffer, 
-			ESMAA_DEPTH_PREDICATION_THRESHOLD,
-			SMAA_THRESHOLD,
+			SMAA_DEPTH_THRESHOLD,
 			1.0,
-			1.0
+			0.4
 		);
 		return float3(depthEdges, 0.0);
 	}

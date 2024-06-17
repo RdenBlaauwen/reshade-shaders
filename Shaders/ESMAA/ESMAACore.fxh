@@ -101,14 +101,16 @@ namespace ESMAACore
       float4 offset[3],
       ESMAASampler2D(depthSampler),
       float depthThreshold,
-      float threshold,
+      // float threshold,
       float predicationScale,
       float strength
     ) {
-        float3 neighbours = SMAAGatherNeighbours(texcoord, offset, SMAATexturePass2D(depthSampler));
+        float4 kek = ESMAAGatherRedOffset(depthSampler, texcoord, int2(-1,-1));
+        float3 neighbours = kek.grb;
         float2 delta = abs(neighbours.xx - neighbours.yz);
+        depthThreshold *= neighbours.x + saturate(0.001 - neighbours.x) * 2.0;
         float2 edges = step(depthThreshold, delta);
-        return predicationScale * threshold * (1.0 - strength * edges);
+        return predicationScale * (1.0 - strength * edges);
     }
 
     // TODO: adapt for remaining depth predication method
@@ -159,7 +161,8 @@ namespace ESMAACore
       float detectionThresh
       )
     {
-      const float sampleOffset = 0.5;
+      // const float sampleOffset = 0.5;
+      const float sampleOffset = 0.2;
       float4 samples;
       float target = ESMAASampleLevelZero(depthSampler, texcoord).r; 
       samples.r = tex2D(depthSampler, texcoord - float2(PIXEL_SIZE.x, -PIXEL_SIZE.y) * sampleOffset).r; // North West
