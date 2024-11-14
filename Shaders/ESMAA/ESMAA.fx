@@ -207,7 +207,7 @@ uniform int CornerRounding < __UNIFORM_SLIDER_INT1
 > = 10;
 
 uniform int DebugOutput < __UNIFORM_COMBO_INT1
-	ui_items = "None\0View edges\0View weights\0Depth predication\0Edge prediction\0";
+	ui_items = "None\0View edges\0View weights\0Depth predication\0Edge prediction\0Asynch edge predication\0";
 	ui_label = "Debug Output";
 > = false;
 
@@ -251,7 +251,7 @@ uniform int ESMAADivider1 <
 
 uniform int DepthPredicationMethod < __UNIFORM_COMBO_INT1
 	ui_category = "Edge Detection";
-	ui_items = "None\0Simple\0Edge prediction\0";
+	ui_items = "None\0Simple\0Edge prediction\0Asynchronous edge predication\0";
 	ui_label = "DepthPredicationMethod";
 > = 0;
 
@@ -265,7 +265,7 @@ uniform float PredicationThreshold < __UNIFORM_DRAG_FLOAT1
 uniform float EdgeEstimationThreshold < __UNIFORM_DRAG_FLOAT1
 	ui_category = "Edge Detection";
 	ui_label = "Edge prediction threshold";
-	ui_min = 0.5; ui_max = 2.0; ui_step = 0.1;
+	ui_min = 0.5; ui_max = 10.0; ui_step = 0.1;
 > = 1.2;
 
 uniform float PredicationAmount < __UNIFORM_DRAG_FLOAT1
@@ -667,7 +667,17 @@ float2 EdgeDetectionWrapperPS(
 			) * ESMAA_EDGE_PREDICTION_WEIGHT;
 
 			predicationAmount = max(predicationAmount, predicationFactor);
-		}
+		} else if(DepthPredicationMethod == 3 && Lib::max(predicationAmount) == 0f) {
+			// Higher values = more confidence that an edge is there
+			float2 predicationFactor = ESMAACore::Predication::GetAsynchronousEdgePredicationFactor(
+				texcoord, 
+				offset, 
+				ReShade::DepthBuffer, 
+				ESMAA_EDGE_PREDICTION_THRESHOLD
+			) * ESMAA_EDGE_PREDICTION_WEIGHT;
+
+			predicationAmount = max(predicationAmount, predicationFactor);
+		} 
 
 		// The higher the predication values (certainty), the closer to predicationThreshold 
 		threshold *= 1.0 - (predicationAmount * PredicationAmount);
@@ -771,6 +781,15 @@ float3 SMAANeighborhoodBlendingWrapPS(
 		);
 		if (DebugOutput == 4 && Lib::max(depthEdges) == 0f) {
 			float2 predictionEdges = ESMAACore::Predication::GetEdgePredictionFactor(
+				texcoord, 
+				edgeOffset, 
+				ReShade::DepthBuffer, 
+				ESMAA_EDGE_PREDICTION_THRESHOLD
+			) * ESMAA_EDGE_PREDICTION_WEIGHT;
+			depthEdges = max(depthEdges, predictionEdges);
+			// depthEdges = predictionEdges;
+		} else if (DebugOutput == 5 && Lib::max(depthEdges) == 0f) {
+			float2 predictionEdges = ESMAACore::Predication::GetAsynchronousEdgePredicationFactor(
 				texcoord, 
 				edgeOffset, 
 				ReShade::DepthBuffer, 

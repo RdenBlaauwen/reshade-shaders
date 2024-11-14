@@ -395,4 +395,9 @@ namespace Lib
     const float3 LUMA_WEIGHTS = float3(0.2126, 0.7152, 0.0722);
     return dot(rgb, LUMA_WEIGHTS);
   }
+
+  float lumaDelta(float3 rgb1, float3 rgb2) {
+    float3 delta = abs(rgb1 - rgb2);
+    return luma(delta);
+  }
 }

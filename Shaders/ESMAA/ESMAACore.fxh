@@ -102,9 +102,11 @@ namespace ESMAACore
       ESMAASampler2D(depthSampler),
       float depthThreshold
     ) {
+        // TODO: write DX9 fallback
         float4 kek = ESMAAGatherRedOffset(depthSampler, texcoord, int2(-1,-1));
         float3 neighbours = kek.grb;
         float2 delta = abs(neighbours.xx - neighbours.yz);
+        // TODO: explain and refactor
         depthThreshold *= neighbours.x + saturate(0.001 - neighbours.x) * 2.0;
         return step(depthThreshold, delta);
     }
@@ -180,6 +182,182 @@ namespace ESMAACore
       float delta = abs(target - localAvg);
 
       return delta > detectionThresh ? float(1.0).xx : float(0.0).xx;
+    }
+
+    // float2 GetAsynchronousEdgePredicationFactor(
+    //   float2 texcoord, 
+    //   float4 offset[3],
+    //   ESMAASampler2D(depthSampler), 
+    //   float detectionThresh
+    //   )
+    // {
+    //   //TODO: define preprocessor value for this in the main shader
+    //   float4 perpendiculars, corners;
+    //   float target;
+
+    //   // #if __RENDERER__ >= 0xa000 // If DX10 or higher
+    //   //   float4 ababt = tex2Dgather(depthSampler, texcoord, 0);
+    //   //   perpendiculars.a = ababt.x;
+    //   //   corners.z = ababt.y;
+    //   //   perpendiculars.b = ababt.z;
+    //   //   target = ababt.w;
+    //   // #else // if DX9
+    //     perpendiculars.a = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, 1)).r;  // South
+    //     corners.z = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, 1)).r; // South East
+    //     perpendiculars.b = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, 0)).r; // East
+    //     target = ESMAASampleLevelZero(depthSampler, texcoord).r; 
+    //   // #endif
+
+    //   corners.r = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 0)).r; // West
+    //   corners.g = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, -1)).r; // North
+      
+    //   corners.x = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, -1)).r; // North West
+    //   corners.y = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, -1)).r; // North East
+    //   corners.w = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 1)).r;  // South West
+
+    //   float4 diagCorners = (perpendiculars.rgba + perpendiculars.gbar) / 2f;
+    //   float2 diagLines = (corners.xy + corners.zw + target) / 3f;
+    //   float2 perpendicularLines = (perpendiculars.rb + perpendiculars.ga + target) / 3f;
+    //   float peripherals = Lib::sum(corners);
+
+    //   float minDepth = Lib::min(Lib::min(diagCorners),Lib::min(diagLines), Lib::min(perpendicularLines), peripherals);
+    //   float maxDepth = Lib::max(Lib::max(diagCorners),Lib::max(diagLines), Lib::max(perpendicularLines), peripherals);
+      
+    //   float localAvg = (Lib::sum(diagCorners) + Lib::sum(diagLines) + Lib::sum(perpendicularLines) + peripherals - minDepth - maxDepth) / 7.0;
+
+    //   // float diagCorner1 = (perpendiculars.r + perpendiculars.g) / 2.0;
+    //   // float diagCorner2 = (perpendiculars.b + perpendiculars.g) / 2.0;
+    //   // float diagCorner3 = (perpendiculars.b + perpendiculars.a) / 2.0;
+    //   // float diagCorner4 = (perpendiculars.r + perpendiculars.a) / 2.0;
+    //   // float diagLine1 = (target + corners.x + corners.z) / 3.0;
+    //   // float diagLine2 = (target + corners.y + corners.w) / 3.0;
+    //   // float perpendicularLine1 = (target + perpendiculars.r + perpendiculars.b) / 3.0;
+    //   // float perpendicularLine2 = (target + perpendiculars.g + perpendiculars.a) / 3.0;
+    //   //       float peripherals = Lib::sum(corners);
+
+    //   // float minDepth = Lib::min(diagCorner1,diagCorner2,diagCorner3,diagCorner4,diagLine1,diagLine2,perpendicularLine1,perpendicularLine2,peripherals);
+    //   // float maxDepth = Lib::max(diagCorner1,diagCorner2,diagCorner3,diagCorner4,diagLine1,diagLine2,perpendicularLine1,perpendicularLine2,peripherals);
+
+    //   // float localAvg = (diagCorner1 + diagCorner2 + diagCorner3 + diagCorner4 + diagLine1 + diagLine2 + perpendicularLine1 + perpendicularLine2 + peripherals - minDepth - maxDepth) / 7.0;
+
+    //   float delta = abs(target - localAvg);
+
+    //   //TODO: refactor, describe
+    //   detectionThresh *= target + saturate(0.001 - target) * 2.0;
+
+    //   return delta > detectionThresh ? float(1.0).xx : float(0.0).xx;
+    // }
+
+    float2 GetAsynchronousEdgePredicationFactor(
+      float2 texcoord, 
+      float4 offset[3],
+      ESMAASampler2D(depthSampler), 
+      float detectionThresh
+      )
+    {
+      // pattern:
+      //  e f g
+      //  h a b
+      //  i c d
+      float e,f,h,a, original;
+
+      #if ESMAA_RENDERER >= ESMAA_RENDERER_D3D10 // if DX10 or above
+        // get RGB values from the c, d, b, and a positions, in order.
+        float4 hafe = ESMAAGatherRedOffset(depthSampler, texcoord, int2(-1, -1));
+        e = hafe.w;
+        f = hafe.z;
+        h = hafe.x;
+        a = hafe.y;
+        original = a;
+      #else // if DX9
+        e = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, -1)).r;
+        f = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, -1)).r;
+        h = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 0)).r;
+        a = SMAASampleLevelZero(depthSampler, texcoord).r;
+        original = a;
+      #endif
+
+      // float currDepth = Lib::linearizeDepth(a);
+      // float topDepth = Lib::linearizeDepth(f);
+      // float leftDepth = Lib::linearizeDepth(h);
+
+      // // Scale so that the treshold is lower closeup, higher at medium distances, and much lower far away.
+      // // TODO: refactor, isolate into separate function.
+      // // TODO: See if replacing by lookup table improves performance.
+      // float depthScaling = (0.3 + (0.7 * currDepth * (5 - ((5 + 0.3) * currDepth))));
+      // float detectionThreshold = detectionThresh * depthScaling;
+
+      // float3 neighbours = float3(currDepth, leftDepth, topDepth);
+      // float2 delta = abs(neighbours.xx - float2(neighbours.y, neighbours.z));
+      // float2 edges = step(detectionThreshold, delta);
+
+      // if (!Lib::any(edges)) return edges;
+
+      float b,c,d;
+      #if ESMAA_RENDERER >= ESMAA_RENDERER_D3D10 // if DX10 or above
+        // get RGB values from the c, d, b, and a positions, in order.
+        float4 cdba = ESMAAGatherRed(depthSampler, texcoord);
+        b = cdba.z;
+        c = cdba.x;
+        d = cdba.y;
+      #else // if DX9
+        b = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, 0)).r;
+        c = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(0, 1)).r;
+        d = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, 1)).r;
+      #endif
+
+      float i = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(-1, 1)).r;
+      float g = ESMAASampleLevelZeroOffset(depthSampler, texcoord, int2(1, -1)).r;
+
+      float eD = abs(a - e);
+      float fD = abs(a - f);
+      float gD = abs(a - g);
+      float hD = abs(a - h);
+      float bD = abs(a - b);
+      float iD = abs(a - i);
+      float cD = abs(a - c);
+      float dD = abs(a - d);
+
+      float diag1 = (eD + dD) / 2.0;
+      float diag2 = (gD + iD) / 2.0;
+      float lowLeftCorner = (hD + iD + cD) / 3.0;
+      float lowRightCorner = (bD + dD + cD) / 3.0;
+      float leftPerpendicular = (hD + cD) / 2.0;
+      float rightPerpendicular = (bD + cD) / 2.0;
+      float midRow = (hD + bD) / 2.0;
+      float lowRow = (iD + cD + dD) / 3.0;
+
+      float diag3 = (iD + gD) / 2.0;
+      float upperRightCorner = (fD + gD + bD) / 3.0;
+      float topPerpendicular = (fD + bD) / 2.0;
+      float midRowVert = (fD + cD) / 2.0;
+      float rightRow = (gD + bD + dD) / 3.0;
+
+      float tMin = Lib::min(diag1, diag2, lowLeftCorner, lowRightCorner, leftPerpendicular, rightPerpendicular, midRow, lowRow, fD);
+      float tMax = Lib::max(diag1, diag2, lowLeftCorner, lowRightCorner, leftPerpendicular, rightPerpendicular, midRow, lowRow, fD);
+
+      float bottomAvg = (diag1 + diag2 + lowLeftCorner + lowRightCorner + leftPerpendicular + rightPerpendicular + midRow + lowRow + fD - tMin - tMax) / 7.0;
+      
+      float lMin = Lib::min(diag1, diag3, upperRightCorner, lowRightCorner, topPerpendicular, rightPerpendicular, midRowVert, rightRow, hD);
+      float lMax = Lib::max(diag1, diag3, upperRightCorner, lowRightCorner, topPerpendicular, rightPerpendicular, midRowVert, rightRow, hD);
+
+      float rightAvg = (diag1 + diag3 + upperRightCorner + lowRightCorner + topPerpendicular + rightPerpendicular + midRowVert + rightRow + hD - lMin - lMax) / 7.0;
+
+      float2 deltas = float2(abs(fD - bottomAvg), abs(hD - rightAvg));
+
+      const float no = 0.0;
+      // const float signifMaybe = 0.6;
+      const float yes = 1.0;
+
+      detectionThresh *= a + saturate(0.001 - a) * 2.0;
+
+      // if (topDelta > detectionThresh) {
+      //   // return max(edges, float2(signifMaybe, signifMaybe)); 
+      //   return float2(yes, yes); 
+      // }
+      // return float2(no, no);
+
+      return step(detectionThresh, deltas);
     }
   }
 
