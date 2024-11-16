@@ -109,6 +109,48 @@ namespace ESMAACore
         return step(depthThreshold, delta);
     }
 
+    float2 GetAsymmetricalTranverseFilteredPredicationFactor(
+      float2 texcoord,
+      float4 offset[3],
+      ESMAASampler2D(depthSampler),
+      float depthThreshold
+    ) {
+        // w g c
+        // r x b
+        // g a i
+        float4 neighbours;
+
+        float4 rxgw = ESMAAGatherRedOffset(depthSampler, texcoord, int2(-1,-1));
+        float x = rxgw.y;
+        neighbours.r = rxgw.x;
+        neighbours.g = rxgw.z;
+        float2 delta = abs(x - neighbours.rg);
+
+        depthThreshold *= neighbours.x + saturate(0.001 - neighbours.x) * 2.0;
+
+        // return step(depthThreshold, delta);
+
+        float2 edges = step(depthThreshold, delta);
+        if(Lib::sum(edges) == 0f) {
+          return edges;
+        }
+
+        float4 aibx = ESMAAGatherRed(depthSampler, texcoord);
+        neighbours.a = aibx.x;
+        neighbours.b = aibx.z;
+
+        float2 expectedRG = x + (x - neighbours.ba);
+
+        float2 error = abs(neighbours.rg - expectedRG);
+
+        error = saturate(error * 100f);
+
+        float2 valids = step(0.0000007, error);
+
+        return edges * valids;
+    }
+
+
     // TODO: adapt for remaining depth predication method
     /**
     * This function is meant for edge predication. It detects geometric edges using depth-detection with high accuracy, but in a symmetric fashion.
