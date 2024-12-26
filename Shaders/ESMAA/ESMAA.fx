@@ -1335,10 +1335,10 @@ float3 cas(float2 texcoord, float contrast, float sharpening)
 		i.b = blue_efhi.y;
 
 	#else // If DX9
-		float3 eT = tex2D(colorLinearSampler, texcoord).rgb;
-		float3 fT = tex2Doffset(colorLinearSampler, texcoord, int2(1, 0)).rgb;
-		float3 hT = tex2Doffset(colorLinearSampler, texcoord, int2(0, 1)).rgb;
-		float3 iT = tex2Doffset(colorLinearSampler, texcoord, int2(1, 1)).rgb;
+		float3 e = tex2D(colorLinearSampler, texcoord).rgb;
+		float3 f = tex2Doffset(colorLinearSampler, texcoord, int2(1, 0)).rgb;
+		float3 h = tex2Doffset(colorLinearSampler, texcoord, int2(0, 1)).rgb;
+		float3 i = tex2Doffset(colorLinearSampler, texcoord, int2(1, 1)).rgb;
 	#endif
 
 	float3 g = tex2Doffset(colorLinearSampler, texcoord, int2(-1, 1)).rgb; 
@@ -1346,30 +1346,17 @@ float3 cas(float2 texcoord, float contrast, float sharpening)
 	float3 c = tex2Doffset(colorLinearSampler, texcoord, int2(1, -1)).rgb;
 
 	// Get treatment flags
-	#if __RENDERER__ >= 0xa000 // If DX10 or higher
-		offset = 0.5 * SMAA_RT_METRICS.xy;
-		float4 red_hife = tex2DgatherR(treatmentSampler, texcoord + offset);
-		
-		float hT = red_efhi.x;
-		float iT = red_efhi.y;
-		float fT = red_efhi.z;
-		float eT = red_efhi.w;
-
-		float4 red_deba = ESMAAGatherRedOffset(treatmentSampler, texcoord + offset, int2(-1,-1));
-
-		float dT = red_deba.x;
-		float bT = red_deba.z;
-		float aT = red_deba.w;
-
-	#else // If DX9
-		float eT = tex2D(treatmentSampler, texcoord).rgb;
+	float eT = tex2D(treatmentSampler, texcoord).rgb;
+	if(eT > 0f) {
 		float fT = tex2Doffset(treatmentSampler, texcoord, int2(1, 0)).rgb;
 		float hT = tex2Doffset(treatmentSampler, texcoord, int2(0, 1)).rgb;
 		float iT = tex2Doffset(treatmentSampler, texcoord, int2(1, 1)).rgb;
-	#endif
+		float gT = tex2Doffset(treatmentSampler, texcoord, int2(-1, 1)).rgb; 
+		float cT = tex2Doffset(treatmentSampler, texcoord, int2(1, -1)).rgb;
 
-	float gT = tex2Doffset(treatmentSampler, texcoord, int2(-1, 1)).rgb; 
-	float cT = tex2Doffset(treatmentSampler, texcoord, int2(1, -1)).rgb;
+		// float3 aMinWeighted = at > 0 ? a : 
+		// float aMaxWeighted = a * aT;
+	}
    
 
 	// Soft min and max.
