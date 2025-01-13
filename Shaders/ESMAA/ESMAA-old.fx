@@ -365,13 +365,6 @@ uniform float ESMAASofteningStrength <
 	ui_category = "Image Softening";
 > = 0.85;
 
-uniform float ESMAASofteningExtraPixelSoftening<
-	ui_type = "slider";
-	ui_min = 0.0; ui_max = 0.5; ui_step = 0.01;
-	ui_label = "Extra pixel smoothing";
-	ui_category = "Image Softening";
-> = 0.15;
-
 uniform bool ESMAAEnableSmoothing <
 	ui_category = "Smoothing";
 	ui_label = "Enable 'smoothing' AA";
@@ -1077,15 +1070,9 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	// otherwise even straight lines would be softened, which would lead to blur
 	float signifEdges = Lib::sum(edgeData) - 1.0;
 
-	// // Could be used as a Pre-processing pass as follows:
-	// // calculate # of corners
-	// float corners = (edgeData.r + edgeData.b) * (edgeData.g + edgeData.a);
-	// bool badEdgeData = corners <= 1f;
-	// bool earlyReturn = !ESMAAEnableSoftening || signifEdges <= 0.0 || background || badEdgeData;
-
 	bool earlyReturn = !ESMAAEnableSoftening || signifEdges <= 0.0 || background;
 	if(earlyReturn) discard;
-
+	
 	// pattern:
 	//  e f g
 	//  h a b
@@ -1118,36 +1105,22 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 h = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 0)).rgb;
 	float3 i = SMAASampleLevelZeroOffset(ReShade::BackBuffer, texcoord, int2(-1, 1)).rgb;
 	
-	// pattern:
-	//  e f g
-	//  h a b
-	//  i c d
-	// Reinforced
-	float3 bottomHalf = (h + a + b + i + c + d) / 6f;
-	float3 topHalf = (h + a + b + e + f + g) / 6f;
-	float3 leftHalf = (e + h + i + f + a + c) / 6f;
-	float3 rightHalf = (f + a + c + g + b + d) / 6f;
-
-	float3 diagHalfNW = (i + a + g + f + h + e) / 6f;
-	float3 diagHalfSE = (i + a + g + b + d + c) / 6f;
-	float3 diagHalfNE = (e + a + d + g + b + f) / 6f;
-	float3 diagHalfSW = (e + a + d + h +  c + i) / 6f;
-
-	float3 diag1 = (e + a + d) / 3f;
-	float3 diag2 = (i + a + g) / 3f;
-
-	float3 maxDesired = Lib::max(leftHalf, bottomHalf, diag1, diag2, topHalf, rightHalf, diagHalfNE, diagHalfNW,diagHalfSE,diagHalfSW);
-	float3 minDesired = Lib::min(leftHalf, bottomHalf, diag1, diag2, topHalf, rightHalf, diagHalfNE, diagHalfNW,diagHalfSE,diagHalfSW);
-
-	// Weakened
-	float3 surround = (h + f + b + c + a) / 5f;
-	float3 diagSurround = (e + g + i + d + a) / 5f;
-
-	float3 maxUndesired = max(surround, diagSurround);
-	float3 minUndesired = min(surround, diagSurround);
-
-	float3 localavg = (maxDesired * 2f + minDesired * 2f - maxUndesired - minUndesired - a * ESMAASofteningExtraPixelSoftening) / (2f - ESMAASofteningExtraPixelSoftening);
-
+	// Various shapes that can be present
+	float3 x1 = (e + f + g) / 3.0;
+	float3 x2 = (h + a + b) / 3.0;
+	float3 x3 = (i + c + d) / 3.0;
+	float3 cap = (h + e + f + g + b) / 5.0;
+	float3 bucket = (h + i + c + d + b) / 5.0;
+	float3 xy1 = (e + a + d) / 3.0;
+	float3 xy2 = (i + a + g) / 3.0;
+	float3 diamond = (h + f + c + b) / 4.0;
+	float3 square = (e + g + i + d) / 4.0;
+	
+	// Get the most divergent shapes..
+	float3 highterm = Lib::max(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
+	float3 lowterm = Lib::min(x1, x2, x3, xy1, xy2, diamond, square, cap, bucket);
+	// ...and subtract them from the average of all shapes
+	float3 localavg = ((a + x1 + x2 + x3 + xy1 + xy2 + diamond + square + cap + bucket) - (highterm + lowterm)) / 8.0;
 
 	// Calculate strength by # of edges above 1
 	float strength = signifEdges / 3.0; 
@@ -1156,7 +1129,7 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float corners = (edgeData.r + edgeData.b) * (edgeData.g + edgeData.a);
 	
 	// Reduce strength for straight lines of 1 pixel thick and their endings, to preserve detail
-	const float LINE_PRESERVATION_FACTOR = 0.6f; // TODO: consider turning into preprocessor constant and adding ui
+	const float LINE_PRESERVATION_FACTOR = 0.6; // TODO: consider turning into preprocessor constant and adding ui
 	strength *= (corners == 0.0 || corners == 2.0) ? LINE_PRESERVATION_FACTOR : 1.0;
 
 	// Calculate blend strength based on weight and edge data
@@ -1434,7 +1407,7 @@ float3 SharpeningPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_
 
 // Rendering passes
 
-technique ESMAA
+technique ESMAAOld
 {
 	pass EdgeDetectionPass
 	{

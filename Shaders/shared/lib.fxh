@@ -143,6 +143,18 @@ namespace Lib
   {
     return max(a, max(b,c,d,e,f,g,h,i));
   }
+  float3 max(float3 a,float3 b,float3 c,float3 d, float3 e, float3 f, float3 g, float3 h, float3 i, float3 j)
+  {
+    return max(a, max(b,c,d,e,f,g,h,i,j));
+  }
+  float3 max(float3 a,float3 b,float3 c,float3 d, float3 e, float3 f, float3 g, float3 h, float3 i, float3 j, float3 k)
+  {
+    return max(a, max(b,c,d,e,f,g,h,i,j,k));
+  }
+  float3 max(float3 a,float3 b,float3 c,float3 d, float3 e, float3 f, float3 g, float3 h, float3 i, float3 j, float3 k, float3 l)
+  {
+    return max(a, max(b,c,d,e,f,g,h,i,j,k,l));
+  }
 
   float min(float a, float b,float c)
   {
@@ -229,6 +241,18 @@ namespace Lib
   float3 min(float3 a,float3 b,float3 c,float3 d, float3 e, float3 f, float3 g, float3 h, float3 i)
   {
     return min(a, min(b,c,d,e,f,g,h,i));
+  }
+  float3 min(float3 a,float3 b,float3 c,float3 d, float3 e, float3 f, float3 g, float3 h, float3 i, float3 j)
+  {
+    return min(a, min(b,c,d,e,f,g,h,i,j));
+  }
+  float3 min(float3 a,float3 b,float3 c,float3 d, float3 e, float3 f, float3 g, float3 h, float3 i, float3 j, float3 k)
+  {
+    return min(a, min(b,c,d,e,f,g,h,i,j,k));
+  }
+  float3 min(float3 a,float3 b,float3 c,float3 d, float3 e, float3 f, float3 g, float3 h, float3 i, float3 j, float3 k, float3 l)
+  {
+    return min(a, min(b,c,d,e,f,g,h,i,j,k,l));
   }
 
   float max(float2 rg)
