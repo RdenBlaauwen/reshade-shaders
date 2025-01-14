@@ -1136,8 +1136,14 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 diag1 = (e + a + d) / 3f;
 	float3 diag2 = (i + a + g) / 3f;
 
+	float3 horz = (h + a + b) / 3f;
+	float3 vert = (f + a + c) / 3f;
+
 	float3 maxDesired = Lib::max(leftHalf, bottomHalf, diag1, diag2, topHalf, rightHalf, diagHalfNE, diagHalfNW,diagHalfSE,diagHalfSW);
 	float3 minDesired = Lib::min(leftHalf, bottomHalf, diag1, diag2, topHalf, rightHalf, diagHalfNE, diagHalfNW,diagHalfSE,diagHalfSW);
+
+	float3 maxLine = Lib::max(horz,vert,maxDesired);
+	float3 minLine = Lib::min(horz,vert,minDesired);
 
 	// Weakened
 	float3 surround = (h + f + b + c + a) / 5f;
@@ -1146,7 +1152,15 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float3 maxUndesired = max(surround, diagSurround);
 	float3 minUndesired = min(surround, diagSurround);
 
-	float3 localavg = (maxDesired * 2f + minDesired * 2f - maxUndesired - minUndesired - a * ESMAASofteningExtraPixelSoftening) / (2f - ESMAASofteningExtraPixelSoftening);
+	const float DesiredPatternsWeight = 2f;
+	const float LineWeight = 1.3f;
+
+	float3 localavg = (
+		(maxDesired + minDesired) * DesiredPatternsWeight 
+		+ (maxLine + minLine) * LineWeight
+		- maxUndesired - minUndesired 
+		- a * ESMAASofteningExtraPixelSoftening
+		) / (((DesiredPatternsWeight + LineWeight) * 2f - 2f) - ESMAASofteningExtraPixelSoftening);
 
 
 	// Calculate strength by # of edges above 1
