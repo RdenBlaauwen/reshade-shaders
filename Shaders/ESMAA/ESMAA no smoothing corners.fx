@@ -1079,11 +1079,11 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 
 	// Could be used as a Pre-processing pass as follows:
 	// calculate # of corners
-	// float corners = (edgeData.r + edgeData.b) * (edgeData.g + edgeData.a);
-	// bool badEdgeData = corners <= 1f;
-	// bool earlyReturn = !ESMAAEnableSoftening || signifEdges <= 0.0 || background || badEdgeData;
+	float corners = (edgeData.r + edgeData.b) * (edgeData.g + edgeData.a);
+	bool badEdgeData = corners <= 1f;
+	bool earlyReturn = !ESMAAEnableSoftening || signifEdges <= 0.0 || background || badEdgeData;
 
-	bool earlyReturn = !ESMAAEnableSoftening || signifEdges <= 0.0 || background;
+	// bool earlyReturn = !ESMAAEnableSoftening || signifEdges <= 0.0 || background;
 	if(earlyReturn) discard;
 
 	// pattern:
@@ -1167,7 +1167,7 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 	float strength = signifEdges / 3.0; 
 
 	// calculate # of corners
-	float corners = (edgeData.r + edgeData.b) * (edgeData.g + edgeData.a);
+	// float corners = (edgeData.r + edgeData.b) * (edgeData.g + edgeData.a);
 	
 	// Reduce strength for straight lines of 1 pixel thick and their endings, to preserve detail
 	const float LINE_PRESERVATION_FACTOR = 0.6f; // TODO: consider turning into preprocessor constant and adding ui
