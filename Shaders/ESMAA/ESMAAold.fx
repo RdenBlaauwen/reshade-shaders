@@ -1448,7 +1448,7 @@ float3 SharpeningPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_
 
 // Rendering passes
 
-technique ESMAA
+technique ESMAAold
 {
 	pass EdgeDetectionPass
 	{
@@ -1481,14 +1481,12 @@ technique ESMAA
 	}
 	pass ImageSoftening
 	{
-		// VertexShader = TSMAANeighborhoodBlendingVS;
-		VertexShader = SMAANeighborhoodBlendingWrapVS;
+		VertexShader = TSMAANeighborhoodBlendingVS;
 		PixelShader = ESMAASofteningPS;
 	}
 	pass ImageSmoothing
 	{
-		// VertexShader = TSMAANeighborhoodBlendingVS;
-		VertexShader = SMAANeighborhoodBlendingWrapVS;
+		VertexShader = TSMAANeighborhoodBlendingVS;
 		PixelShader = SmoothingPS;
 	}
 	pass Sharpening
