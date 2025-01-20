@@ -1448,7 +1448,7 @@ float3 SharpeningPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_
 
 // Rendering passes
 
-technique ESMAA
+technique ESMAANoSmoothingCorners
 {
 	pass EdgeDetectionPass
 	{

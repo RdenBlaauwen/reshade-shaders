@@ -356,10 +356,10 @@ uniform int ESMAADivider3 <
 	ui_label = " ";
 >;
 
-uniform float ESMAASofteningLumaPreservationStrength <
+uniform float ESMAASofteningHighlightPreservationStrength <
 	ui_type = "slider";
 	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
-	ui_label = "Luma preservation strength";
+	ui_label = "Highlight preservation strength";
 	ui_category = "Image Softening";
 > = 0f;
 
@@ -1169,13 +1169,12 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 		- a * ESMAASofteningExtraPixelSoftening
 		) / (((DesiredPatternsWeight + LineWeight) * 2f - 2f) - ESMAASofteningExtraPixelSoftening);
 
-	// TODO: test this!
 	// If the new target pixel value is less bright than the max desired shape, boost it's value accordingly
 	float maxLuma = Lib::luma(maxLine);
 	float localLuma = Lib::luma(localavg);
 	// if new value is brighter than max desired shape, boost strength is 0f and localavg should be multiplied by 1f. Else, boost it.
 	float boost = saturate(maxLuma - localLuma);
-	localavg *= mad(localLuma, ESMAASofteningLumaPreservationStrength, 1f);
+	localavg *= mad(boost, ESMAASofteningHighlightPreservationStrength, 1f);
 
 	// Calculate strength by # of edges above 1
 	float strength = signifEdges / 3.0; 
