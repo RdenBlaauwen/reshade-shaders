@@ -356,12 +356,17 @@ uniform int ESMAADivider3 <
 	ui_label = " ";
 >;
 
-uniform float ESMAASofteningHighlightPreservationStrength <
-	ui_type = "slider";
-	ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
-	ui_label = "Highlight preservation strength";
+uniform float ESMAASofteningLumaPreservationBias <
 	ui_category = "Image Softening";
-> = 0f;
+	ui_label = "Luma preservation bias";
+	ui_type = "slider";
+	ui_min = -1.0; ui_max = 1.0; ui_step = 0.05;
+	ui_tooltip = 
+		"Determines whether the shader focuses more on preserving bright shapes or\n"
+		"darker shapes. Higher values benefit highlights, lower values benefit dark\n"
+		"lines and pixels.\n"
+		"Recommended value: [0.2..0.8]";
+> = 0.5f;
 
 uniform float ESMAASofteningStrength <
 	ui_type = "slider";
@@ -1171,10 +1176,15 @@ float3 ESMAASofteningPS(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0, 
 
 	// If the new target pixel value is less bright than the max desired shape, boost it's value accordingly
 	float maxLuma = Lib::luma(maxLine);
+	float minLuma = Lib::luma(minLine);
 	float localLuma = Lib::luma(localavg);
 	// if new value is brighter than max desired shape, boost strength is 0f and localavg should be multiplied by 1f. Else, boost it.
 	float boost = saturate(maxLuma - localLuma);
-	localavg *= mad(boost, ESMAASofteningHighlightPreservationStrength, 1f);
+	float weaken = minLuma - localLuma;
+	float oldLuma = Lib::luma(a);
+	float balancer = saturate(oldLuma + ESMAASofteningLumaPreservationBias);
+	float mod = lerp(weaken, boost, balancer);
+	localavg *= 1f + mod;
 
 	// Calculate strength by # of edges above 1
 	float strength = signifEdges / 3.0; 
